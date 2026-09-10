@@ -32,12 +32,12 @@ export default function Login() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h2 className="mb-6 text-2xl font-bold text-gray-800 text-center">Log In to ResTrade</h2>
+    <main className="auth-page">
+      <section className="auth-visual"><Link href="/" className="brand"><span className="brand-mark">R</span> ResTrade</Link><div><h1>Good trades start with trust.</h1><p>One clear place to discover products, protect your payment, and build a reputation that travels with you.</p></div><span className="nav-label">Secure peer-to-peer commerce</span></section>
+      <section className="auth-form-wrap"><div className="auth-card"><h2>Welcome back</h2><p>Log in to continue to your ResTrade workspace.</p>
         
         {errorMsg && (
-          <div className="mb-4 p-3 text-sm rounded bg-red-50 text-red-700 font-medium">
+          <div className="auth-error">
             {errorMsg}
           </div>
         )}
@@ -68,19 +68,19 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded bg-blue-600 p-2 font-semibold text-white transition hover:bg-blue-700 disabled:bg-gray-400"
+            className="button button-primary"
           >
             {loading ? 'Logging in...' : 'Log In'}
           </button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-gray-600">
+        <p className="auth-foot">
           Don't have an account yet?{' '}
           <Link href="/register" className="text-blue-600 hover:underline">
             Register
           </Link>
         </p>
-      </div>
+      </div></section>
     </main>
   );
 }

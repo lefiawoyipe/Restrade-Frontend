@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
+import SiteShell from '../components/SiteShell';
 
 interface Order {
   id: string;
@@ -36,7 +37,7 @@ export default function Orders() {
     const { data: { session }, error: authError } = await supabase.auth.getSession();
     
     if (authError || !session) {
-      router.push('/login');
+      router.replace('/login');
       return;
     }
 
@@ -78,7 +79,7 @@ export default function Orders() {
   const handleReleaseEscrow = async (orderId: string) => {
     if (!userId) return;
     setProcessingId(orderId);
-
+  
     // Call our PostgreSQL function to release funds to the seller!
     const { error } = await supabase.rpc('release_escrow', {
       p_order_id: orderId,
@@ -92,6 +93,25 @@ export default function Orders() {
     } else {
       alert('Escrow Released! The seller has received their funds.');
       fetchOrders(); // Refresh order status to "completed"
+    }
+  };
+
+  const handleRaiseDispute = async (orderId: string) => {
+    if (!userId) return;
+    if (!confirm('Are you sure you want to dispute this order? Funds will be frozen until an Admin reviews it.')) return;
+
+    setProcessingId(orderId);
+    const { error } = await supabase.rpc('raise_dispute', {
+      p_order_id: orderId,
+      p_buyer_id: userId
+    });
+    setProcessingId(null);
+
+    if (error) {
+      alert(`Error: ${error.message}`);
+    } else {
+      alert('⚠️ Order marked as DISPUTED. Funds are frozen. A System Admin will review the transaction.');
+      fetchOrders();
     }
   };
 
@@ -129,7 +149,8 @@ export default function Orders() {
   }
 
   return (
-    <main className="min-h-screen bg-gray-50 p-6">
+    <SiteShell title="My orders" eyebrow="Your trading activity">
+    <main className="min-h-screen bg-transparent p-0">
       <div className="mx-auto max-w-4xl">
         
         {/* Header Section */}
@@ -183,6 +204,17 @@ export default function Orders() {
                         className="rounded bg-green-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-green-700 disabled:bg-gray-400"
                       >
                         {processingId === order.id ? 'Releasing...' : '✓ Confirm Receipt & Release Funds'}
+                      </button>
+                    )}
+
+                    {/* Action Button: Dispute Order */}
+                    {order.status === 'escrow_funded' && (
+                      <button
+                        onClick={() => handleRaiseDispute(order.id)}
+                        disabled={processingId === order.id}
+                        className="rounded border border-red-500 bg-red-50 px-4 py-2 text-xs font-bold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
+                      >
+                        ⚠️ Report Issue / Dispute
                       </button>
                     )}
 
@@ -243,5 +275,6 @@ export default function Orders() {
         )}
       </div>
     </main>
+    </SiteShell>
   );
 }

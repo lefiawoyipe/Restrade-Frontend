@@ -39,12 +39,12 @@ export default function Register() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
-      <div className="w-full max-w-md rounded-lg bg-white p-8 shadow-md">
-        <h2 className="mb-6 text-2xl font-bold text-gray-800 text-center">Create your ResTrade Account</h2>
+    <main className="auth-page">
+      <section className="auth-visual"><Link href="/" className="brand"><span className="brand-mark">R</span> ResTrade</Link><div><h1>Make every transaction count.</h1><p>Join a marketplace where clear profiles and protected escrow make moving goods feel easy.</p></div><span className="nav-label">Start your trusted profile</span></section>
+      <section className="auth-form-wrap"><div className="auth-card"><h2>Create your account</h2><p>Set up your ResTrade profile in less than a minute.</p>
         
         {message && (
-          <div className="mb-4 p-3 text-sm rounded bg-blue-50 text-blue-700 font-medium">
+          <div className="auth-error">
             {message}
           </div>
         )}
@@ -86,19 +86,20 @@ export default function Register() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded bg-blue-600 p-2 font-semibold text-white transition hover:bg-blue-700 disabled:bg-gray-400"
+            className="button button-primary"
           >
             {loading ? 'Creating Account...' : 'Sign Up'}
           </button>
         </form>
 
-        <p className="mt-4 text-center text-sm text-gray-600">
+        <p className="auth-foot">
           Already have an account?{' '}
           <Link href="/login" className="text-blue-600 hover:underline">
             Log In
           </Link>
         </p>
-      </div>
+        <div className="auth-company-link"><strong>New to ResTrade?</strong><span>Learn how our marketplace and protected escrow work.</span><Link href="/about">About ResTrade →</Link></div>
+      </div></section>
     </main>
   );
 }
