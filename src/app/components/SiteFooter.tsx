@@ -7,7 +7,7 @@ import xIcon from '@/icon images/twitterx.png';
 import tiktokIcon from '@/icon images/tiktok.png';
 
 const companyLinks = [
-  { href: '/', label: 'About ResTrade' },
+  { href: '/about', label: 'About ResTrade' },
   { href: '/settings', label: 'Privacy & settings' },
   { href: '/orders', label: 'Dispute & refunds' },
 ];

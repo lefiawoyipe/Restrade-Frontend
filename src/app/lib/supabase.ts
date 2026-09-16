@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
 
 function normalizeSupabaseUrl(url: string) {
   return url.replace(/\/+$/, '').replace(/\/rest\/v1$/, '');
@@ -11,5 +11,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-// Export the connected client for use across the application
-export const supabase = createClient(normalizeSupabaseUrl(supabaseUrl), supabaseAnonKey);
+export const supabase = createBrowserClient(
+  normalizeSupabaseUrl(supabaseUrl),
+  supabaseAnonKey,
+);

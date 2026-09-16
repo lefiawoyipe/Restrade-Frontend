@@ -82,8 +82,7 @@ export default function Orders() {
   
     // Call our PostgreSQL function to release funds to the seller!
     const { error } = await supabase.rpc('release_escrow', {
-      p_order_id: orderId,
-      p_buyer_id: userId
+      p_order_id: orderId
     });
 
     setProcessingId(null);
@@ -102,15 +101,14 @@ export default function Orders() {
 
     setProcessingId(orderId);
     const { error } = await supabase.rpc('raise_dispute', {
-      p_order_id: orderId,
-      p_buyer_id: userId
+      p_order_id: orderId
     });
     setProcessingId(null);
 
     if (error) {
-      alert(`Error: ${error.message}`);
+      alert(`Error raising dispute: ${error.message}`);
     } else {
-      alert('⚠️ Order marked as DISPUTED. Funds are frozen. A System Admin will review the transaction.');
+      alert('Dispute has been raised. Funds are frozen pending admin review.');
       fetchOrders();
     }
   };

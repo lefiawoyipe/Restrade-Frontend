@@ -80,7 +80,6 @@ export default function Marketplace() {
 
     // Call the exact PostgreSQL Stored Procedure we wrote in Phase 4
     const { error } = await supabase.rpc('initiate_purchase', {
-      p_buyer_id: userId,
       p_product_id: productId
     });
 

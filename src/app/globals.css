@@ -120,4 +120,27 @@ button, input, textarea, select { font: inherit; }
 .public-info-grid article { padding: 28px; border: 1px solid rgba(91,137,153,.2); border-radius: 12px; background: rgba(255,255,255,.62); }
 .public-info-grid h2 { margin: 0 0 10px; color: var(--navy); font-size: 20px; }
 .public-info-grid p { margin: 0; color: #617889; font-size: 14px; line-height: 1.7; }
+.trust-details { max-width: 1160px; margin: 0 auto; padding: 8px 30px 105px; display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(285px, .8fr); gap: 24px; align-items: stretch; }
+.escrow-flow, .reputation-card { padding: 34px; border: 1px solid rgba(91,137,153,.2); border-radius: 18px; background: rgba(255,255,255,.72); box-shadow: 0 18px 45px rgba(47,100,119,.08); }
+.trust-section-heading { display: grid; grid-template-columns: 1fr auto; gap: 4px 20px; align-items: start; }
+.trust-section-heading h2, .reputation-card h2 { margin: 0 0 9px; color: var(--navy); font-size: clamp(22px, 2.5vw, 29px); letter-spacing: -.05em; }
+.trust-section-heading p { grid-column: 1 / -1; margin: 0; color: #617889; font-size: 14px; line-height: 1.6; }
+.escrow-badge, .verified-pill { align-self: center; padding: 8px 11px; border-radius: 999px; background: #e3f7f5; color: #087f90; font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; }
+.escrow-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 29px 0 25px; padding: 0; list-style: none; }
+.escrow-steps li { position: relative; min-height: 145px; padding: 17px 15px; border: 1px solid #dcebef; border-radius: 12px; background: rgba(247,252,253,.85); }
+.step-number { width: 29px; height: 29px; display: grid; place-items: center; margin-bottom: 22px; border-radius: 50%; background: var(--navy); color: white; font-size: 12px; font-weight: 800; }
+.escrow-steps strong { display: block; color: var(--navy); font-size: 13px; line-height: 1.3; }
+.escrow-steps p { margin: 7px 0 0; color: #718397; font-size: 12px; line-height: 1.5; }
+.step-arrow { position: absolute; top: 22px; right: -16px; z-index: 1; width: 21px; height: 21px; display: grid; place-items: center; border-radius: 50%; background: #c6e9e9; color: #087f90; font-size: 14px; }
+.dispute-note { display: grid; gap: 4px; padding-top: 17px; border-top: 1px solid rgba(91,137,153,.18); color: #617889; font-size: 12px; }
+.dispute-note strong { color: #b25d4e; font-size: 13px; }
+.reputation-card { background: #102d46; color: white; }
+.reputation-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }.reputation-topline .eyebrow { margin-bottom: 0; }
+.verified-pill { background: rgba(101,216,211,.14); color: #65d8d3; font-size: 9px; }
+.reputation-card .eyebrow { color: #65d8d3; }
+.reputation-card h2 { color: white; }
+.reputation-score { display: flex; align-items: center; gap: 13px; margin: 25px 0 8px; }.reputation-score > strong { color: white; font-size: 48px; line-height: 1; letter-spacing: -.07em; }.reputation-score div { display: grid; gap: 3px; }.reputation-score span { color: #f5c96b; font-size: 17px; letter-spacing: 2px; }.reputation-score small { color: #a9c2d1; font-size: 10px; }.transaction-count { margin: 0; color: #a9c2d1; font-size: 12px; }.transaction-count strong { color: white; font-size: 15px; }
+.verification-list { display: grid; gap: 0; margin: 27px 0 0; padding: 5px 0 0; border-top: 1px solid #2a516c; list-style: none; color: #d8e6f0; font-size: 12px; }.verification-list li { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(42,81,108,.7); }.verification-list li::before { content: '✓'; order: 2; color: #65d8d3; font-weight: 800; }.verification-list li strong { order: 3; color: #65d8d3; font-size: 11px; }
+@media (max-width: 980px) and (min-width: 761px) { .trust-details { grid-template-columns: 1fr; }.escrow-steps { grid-template-columns: repeat(4, 1fr); } }
 @media (max-width: 760px) { .public-info-nav { padding: 20px; }.public-info-hero { padding: 80px 24px 50px; }.public-info-grid { grid-template-columns: 1fr; padding: 0 24px 50px; } }
+@media (max-width: 760px) { .trust-details { grid-template-columns: 1fr; padding: 0 24px 70px; gap: 16px; }.escrow-flow, .reputation-card { padding: 25px 21px; border-radius: 15px; }.trust-section-heading { display: block; }.escrow-badge { display: inline-flex; margin-top: 12px; }.escrow-steps { grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 23px; }.escrow-steps li { min-height: 132px; padding: 14px 12px; }.step-number { margin-bottom: 17px; }.step-arrow { display: none; }.reputation-topline { align-items: flex-start; }.verified-pill { margin-top: -2px; } }
