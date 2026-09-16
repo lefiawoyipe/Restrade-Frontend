@@ -27,7 +27,8 @@ export default function Login() {
     if (error) {
       setErrorMsg(error.message);
     } else {
-      router.push('/dashboard'); // We will build the main dashboard next
+      router.refresh();
+      router.push('/dashboard'); 
     }
   };
 
@@ -75,7 +76,7 @@ export default function Login() {
         </form>
 
         <p className="auth-foot">
-          Don't have an account yet?{' '}
+          Don&apos;t have an account yet?{' '}
           <Link href="/register" className="text-blue-600 hover:underline">
             Register
           </Link>
