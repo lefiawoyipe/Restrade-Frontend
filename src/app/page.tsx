@@ -1,38 +1,124 @@
-'use client';
-
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import SiteFooter from './components/SiteFooter';
-
+"use client";
+import { useDataRefresh } from "@/lib/use-data-refresh";
+import Image from "next/image";
+import Link from "next/link";
+import { useCallback, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { errorMessage, productSelect, type Product } from "@/lib/marketplace";
+import ProductCard from "./components/ProductCard";
+import {
+  PublicFooter,
+  PublicHeader,
+  TradingSteps,
+} from "./components/PublicLayout";
+import { Icon, LoadState } from "./components/UI";
 export default function Home() {
-  const [status, setStatus] = useState('Checking connection...');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const router = useRouter();
-
-  useEffect(() => {
-    const checkConnection = async () => {
-      const { data, error } = await supabase.auth.getSession();
-      
-      if (error) {
-        setStatus(`Connection failed: ${error.message}`);
-      } else {
-        setIsLoggedIn(Boolean(data.session));
-        setStatus('Supabase connected successfully! Ready to build ResTrade.');
-      }
-    };
-
-    checkConnection();
+  const [products, setProducts] = useState<Product[]>([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      let query = supabase
+        .from("products")
+        .select(productSelect)
+        .eq("status", "available")
+        .order("created_at", { ascending: false })
+        .limit(3);
+      if (session) query = query.neq("seller_id", session.user.id);
+      const result = await query;
+      if (result.error) throw result.error;
+      setProducts(result.data as unknown as Product[]);
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
   }, []);
-
+  useDataRefresh(load, false);
   return (
-    <main className="landing-page">
-      <header className="landing-nav"><Link className="brand landing-brand" href="/"> <span className="brand-mark">R</span> ResTrade</Link><nav><Link href="/marketplace">Marketplace</Link>{isLoggedIn ? <span className="landing-auth-disabled" aria-disabled="true">Log in</span> : <Link href="/login">Log in</Link>}{isLoggedIn ? <span className="button button-primary button-small landing-auth-disabled" aria-disabled="true">Sign up</span> : <Link className="button button-primary button-small" href="/register">Sign up</Link>}</nav></header>
-      <section className="landing-hero"><div className="hero-copy"><span className="hero-kicker">• Protected peer-to-peer commerce</span><h1>Trade with confidence.<br /><em>Move forward.</em></h1><p>ResTrade makes buying and selling online feel simple, transparent, and secure from the first click to the final handoff.</p><div className="hero-actions"><button type="button" onClick={() => router.push(isLoggedIn ? '/dashboard' : '/register')} className="button button-primary hero-button">Start trading</button><Link href="/marketplace" className="button hero-secondary">Explore marketplace <span>→</span></Link></div><div className="trust-row"><span>✓ Escrow protected</span><span>✓ Verified profiles</span></div></div><div className="hero-art"><div className="art-glow" /><div className="art-card"><span className="art-check">✓</span><span>Escrow</span><strong>GH₵ 2,450.00</strong><small>Funds secured</small></div><div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" /></div></section>
-      <section className="landing-strip"><span>Built for better transactions</span><strong>Buy safely</strong><strong>Sell simply</strong><strong>Trust every step</strong></section>
-      <SiteFooter />
-      <p className="status-note">{status}</p>
-    </main>
+    <>
+      <PublicHeader />
+      <main className="public-page" id="main">
+        <section className="hero">
+          <div>
+            <p className="eyebrow hero-eyebrow">
+              Less spending. More student life.
+            </p>
+            <h1>
+              Your campus.
+              <br />
+              Your next
+              <br />
+              <span>great find.</span>
+            </h1>
+            <p>
+              From lecture-ready laptops to room essentials. Buy what you need
+              and sell what you don’t, with students around you.
+            </p>
+            <div className="row wrap">
+              <Link className="btn primary" href="/marketplace">
+                Explore the marketplace <Icon name="arrow" />
+              </Link>
+              <Link className="btn" href="/dashboard">
+                Sell an item
+              </Link>
+            </div>
+            <p className="hero-trust">
+              <Icon name="shield" />
+              Clear prices. Seller reviews. Payment through escrow.
+            </p>
+          </div>
+          <div className="hero-picture">
+            <Image
+              src="/images/campus-backpack.jpg"
+              alt="A navy backpack, an illustration of everyday campus essentials"
+              width={700}
+              height={700}
+              priority
+            />
+            <span className="hero-tag">
+              Good things deserve a second semester.
+            </span>
+          </div>
+        </section>
+        <div className="panel-head">
+          <h2>A better way to pass it on.</h2>
+          <Link className="text-link" href="/about">
+            How it works <Icon name="arrow" />
+          </Link>
+        </div>
+        <TradingSteps />
+        <section className="featured-listings">
+          <div className="panel-head">
+            <h2>A few campus finds</h2>
+            <Link className="text-link" href="/marketplace">
+              See all items <Icon name="arrow" />
+            </Link>
+          </div>
+          {loading || error ? (
+            <LoadState loading={loading} error={error} retry={load} />
+          ) : (
+            <div className="products">
+              {products.length ? (
+                products.map((p) => <ProductCard key={p.id} product={p} />)
+              ) : (
+                <div className="empty">
+                  <h3>New finds are on their way.</h3>
+                  <p>Be the first to give a useful item a new home.</p>
+                  <Link className="btn primary" href="/dashboard">
+                    List an item
+                  </Link>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </main>
+      <PublicFooter />
+    </>
   );
 }

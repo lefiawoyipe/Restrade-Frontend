@@ -1,441 +1,309 @@
-'use client';
+"use client";
+import { useDataRefresh } from "@/lib/use-data-refresh";
+import Link from "next/link";
+import { useCallback, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import {
+  errorMessage,
+  loadOrders,
+  loadProducts,
+  money,
+  notifyDataChanged,
+  type Order,
+  type Product,
+} from "@/lib/marketplace";
+import SiteShell, { useWorkspace } from "../components/SiteShell";
+import ListingForm from "../components/ListingForm";
+import {
+  Feedback,
+  Icon,
+  LoadState,
+  Modal,
+  PageHeader,
+  ProductImage,
+  StatusBadge,
+} from "../components/UI";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import Link from 'next/link';
-import SiteShell from '../components/SiteShell';
-
-// Define TypeScript interfaces for our database records
-interface Profile {
-  full_name: string;
-  trust_score: number;
-  total_reviews: number;
-}
-
-interface Wallet {
-  balance: number;
-}
-
-interface Product {
-  id: string;
-  title: string;
-  description?: string;
-  price: number;
-  status: string;
-}
-
-interface OrderSummary {
-  id: string;
-  amount: number;
-  status: string;
-  productTitle: string;
-}
-
-export default function Dashboard() {
-  const router = useRouter();
-  const [loading, setLoading] = useState(true);
-  
-  // User Data State
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [wallet, setWallet] = useState<Wallet | null>(null);
-  const [myProducts, setMyProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<OrderSummary[]>([]);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [stats, setStats] = useState({ products: 0, active: 0, completed: 0 });
-
-  // New Product Form State
-  const [showForm, setShowForm] = useState(false);
-  const [newTitle, setNewTitle] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [newPrice, setNewPrice] = useState('');
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [editingProductId, setEditingProductId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
-
-  const fetchDashboardData = async () => {
+function DashboardContent() {
+  const { userId, profile, sell } = useWorkspace();
+  const [products, setProducts] = useState<Product[]>([]),
+    [orders, setOrders] = useState<Order[]>([]),
+    [balance, setBalance] = useState<number | null>(null),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [topUp, setTopUp] = useState(false),
+    [busy, setBusy] = useState(false),
+    [actionError, setActionError] = useState(""),
+    [message, setMessage] = useState(""),
+    [editing, setEditing] = useState<Product | null>(null);
+  const lock = useRef(false);
+  const load = useCallback(async () => {
     try {
-      // 1. Check if user is logged in
-      const { data: { session }, error: authError } = await supabase.auth.getSession();
-      
-      if (authError || !session) {
-        router.replace('/login');
-        return;
-      }
-
-      const uid = session.user.id;
-      setUserId(uid);
-
-      // 2. Fetch Profile (Full Name, Trust Score)
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', uid)
-        .single();
-      
-      if (profileData) setProfile(profileData);
-
-      // 3. Fetch Wallet Balance
-      const { data: walletData } = await supabase
-        .from('wallets')
-        .select('balance')
-        .eq('user_id', uid)
-        .single();
-      
-      if (walletData) setWallet(walletData);
-
-      // 4. Count: Products (Listed by you)
-      const { count: productsCount } = await supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true })
-        .eq('seller_id', uid);
-
-      // 5. Count: Orders (Active Escrow purchases)
-      const { count: activeOrdersCount } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('buyer_id', uid)
-        .eq('status', 'escrow_funded');
-
-      // 6. Count: Purchases (Completed safely)
-      const { count: completedOrdersCount } = await supabase
-        .from('orders')
-        .select('*', { count: 'exact', head: true })
-        .eq('buyer_id', uid)
-        .eq('status', 'completed');
-
-      // Store stats
-      setStats({
-        products: productsCount || 0,
-        active: activeOrdersCount || 0,
-        completed: completedOrdersCount || 0,
-      });
-
-      // 7. Fetch Products Listed by this User (for inventory display)
-      const { data: productData } = await supabase
-        .from('products')
-        .select('id, title, description, price, status')
-        .eq('seller_id', uid)
-        .order('created_at', { ascending: false });
-
-      if (productData) setMyProducts(productData);
-
-      // 8. Fetch Recent Orders (limit to 3 for dashboard preview)
-      const { data: orderData } = await supabase
-        .from('orders')
-        .select('id, amount, status, products(title)')
-        .eq('buyer_id', uid)
-        .order('created_at', { ascending: false })
-        .limit(3);
-
-      if (orderData) {
-        setOrders(orderData.map((order: { id: string; amount: number; status: string; products?: { title?: string }[] | null }) => ({
-          id: order.id,
-          amount: order.amount,
-          status: order.status,
-          productTitle: order.products?.[0]?.title || 'Unknown product',
-        })));
-      }
-
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      const [inventory, activity, wallet] = await Promise.all([
+        loadProducts(userId, true),
+        loadOrders(),
+        supabase
+          .from("wallets")
+          .select("balance")
+          .eq("user_id", userId)
+          .single(),
+      ]);
+      if (wallet.error) throw wallet.error;
+      setProducts(inventory);
+      setOrders(activity.filter((o) => o.buyer_id === userId));
+      setBalance(wallet.data.balance);
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleTopUp = async () => {
-    const input = prompt('How many simulated Ghana Cedis (GH₵) would you like to add to your test wallet? (Max: 10,000)');
-    if (!input) return;
-
-    const amount = parseFloat(input);
-    if (isNaN(amount) || amount <= 0) {
-      alert('Please enter a valid number greater than 0.');
+  }, [userId]);
+  useDataRefresh(load);
+  async function fund(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (lock.current) return;
+    const amount = Number(new FormData(event.currentTarget).get("amount"));
+    if (!Number.isFinite(amount) || amount <= 0 || amount > 100000) {
+      setActionError("Enter an amount between GH₵ 0.01 and GH₵ 100,000.");
       return;
     }
-
-    const { error } = await supabase.rpc('fund_wallet', { p_amount: amount });
-
-    if (error) {
-      alert(`Top-up failed: ${error.message}`);
-    } else {
-      alert(`Successfully added GH₵ ${amount.toFixed(2)} to your wallet!`);
-      fetchDashboardData(); // Refresh the balance display on the screen
+    lock.current = true;
+    setBusy(true);
+    setActionError("");
+    try {
+      const { error: failure } = await supabase.rpc("fund_wallet", {
+        p_amount: amount,
+      });
+      if (failure) throw failure;
+      setTopUp(false);
+      setMessage(`${money(amount)} added to your test wallet.`);
+      notifyDataChanged();
+    } catch (cause) {
+      setActionError(errorMessage(cause));
+    } finally {
+      lock.current = false;
+      setBusy(false);
     }
-  };
-
-  const handleSubmitListing = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userId) return;
-    
-    setIsSubmitting(true);
-
-    let imageUrl: string | null = null;
-
-    if (imageFile) {
-      const fileExt = imageFile.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-      const filePath = `${userId}/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('product-images')
-        .upload(filePath, imageFile);
-
-      if (uploadError) {
-        alert(`Image upload failed: ${uploadError.message}`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      const { data: publicUrlData } = supabase.storage
-        .from('product-images')
-        .getPublicUrl(filePath);
-
-      imageUrl = publicUrlData.publicUrl;
-    }
-
-    let dbError;
-    const isEditing = Boolean(editingProductId);
-
-    if (editingProductId) {
-      const updateData: {
-        title: string;
-        description: string;
-        price: number;
-        image_url?: string;
-      } = {
-        title: newTitle,
-        description: newDescription,
-        price: parseFloat(newPrice),
-      };
-
-      if (imageUrl) updateData.image_url = imageUrl;
-
-      const { error } = await supabase
-        .from('products')
-        .update(updateData)
-        .eq('id', editingProductId)
-        .eq('seller_id', userId);
-      dbError = error;
-    } else {
-      const { error } = await supabase.from('products').insert([
-        {
-          seller_id: userId,
-          title: newTitle,
-          description: newDescription,
-          price: parseFloat(newPrice),
-          status: 'available',
-          image_url: imageUrl,
-        }
-      ]);
-      dbError = error;
-    }
-
-    setIsSubmitting(false);
-
-    if (dbError) {
-      alert(`Error saving product: ${dbError.message}`);
-    } else {
-      // Reset form and refresh product list
-      setNewTitle('');
-      setNewDescription('');
-      setNewPrice('');
-      setImageFile(null);
-      setShowForm(false);
-      setEditingProductId(null);
-      fetchDashboardData(); 
-      alert(isEditing ? 'Listing updated!' : 'Listing published!');
-    }
-  };
-
-  const handleEditClick = (product: Product) => {
-    setNewTitle(product.title);
-    setNewPrice(product.price.toString());
-    setNewDescription(product.description || '');
-    setEditingProductId(product.id);
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleCancelForm = () => {
-    setShowForm(false);
-    setEditingProductId(null);
-    setNewTitle('');
-    setNewPrice('');
-    setNewDescription('');
-    setImageFile(null);
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-lg font-medium text-gray-600">Loading your secure dashboard...</p>
-      </div>
-    );
   }
-
+  const active = orders.filter((o) =>
+    ["escrow_funded", "disputed"].includes(o.status),
+  );
   return (
-    <SiteShell title="Overview" eyebrow="Good morning">
-    <main className="min-h-screen bg-transparent p-0">
-      <div className="mx-auto max-w-5xl">
-        
-        {/* Header Section */}
-        <header className="mb-6 flex items-center justify-between rounded-lg bg-white p-6 shadow-sm">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-800">Welcome, {profile?.full_name}</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Trust Score: {profile?.total_reviews ? <><span className="font-semibold text-blue-600">{profile.trust_score} / 5.0</span> ({profile.total_reviews} reviews)</> : <span className="font-semibold text-gray-500">— · No reviews yet</span>}
-            </p>
-          </div>
-        <div className="flex flex-wrap gap-3">
-            <Link 
-              href="/orders"
-              className="rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-700"
-            >
-              My Orders 
-            </Link>
-          </div>
-        </header>
-
-        <section className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3" aria-label="Account summary">
-          <div className="rounded-lg border border-gray-100 bg-white p-5 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Products</p><p className="mt-2 text-2xl font-bold text-gray-800">{stats.products}</p><p className="mt-1 text-xs text-gray-500">Listed by you</p></div>
-          <div className="rounded-lg border border-gray-100 bg-white p-5 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Orders</p><p className="mt-2 text-2xl font-bold text-gray-800">{stats.active}</p><p className="mt-1 text-xs text-gray-500">Escrow purchases</p></div>
-          <div className="rounded-lg border border-gray-100 bg-white p-5 shadow-sm"><p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Purchases</p><p className="mt-2 text-2xl font-bold text-gray-800">{stats.completed}</p><p className="mt-1 text-xs text-gray-500">Completed safely</p></div>
-        </section>
-
-        <div className="grid gap-6 md:grid-cols-3">
-          
-          {/* Left Column: Wallet & Actions */}
-          <div className="space-y-6 md:col-span-1">
-            
-           {/* Wallet Card */}
-            <div className="rounded-lg bg-gradient-to-br from-blue-600 to-blue-800 p-6 text-white shadow-md flex flex-col justify-between">
-              <div>
-                <h2 className="text-sm font-medium text-blue-100 opacity-80">Test Wallet</h2>
-                <p className="mt-2 text-4xl font-bold">GH₵ {wallet?.balance?.toFixed(2) || '0.00'}</p>
-                <p className="mt-2 text-xs text-blue-200">Secured by ResTrade Escrow</p>
+    <>
+      <PageHeader
+        title={`Hey ${profile.full_name?.split(" ")[0] || "there"}, welcome back.`}
+        description="Here’s what’s happening with your campus trades."
+        action={
+          <Link className="btn primary" href="/marketplace">
+            Explore marketplace <Icon name="arrow" />
+          </Link>
+        }
+      />
+      <Feedback message={message} />
+      {loading || error ? (
+        <LoadState loading={loading} error={error} retry={load} />
+      ) : (
+        <>
+          <div className="stats">
+            {[
+              ["Your listings", products.length, "Items you’ve listed", "shop"],
+              [
+                "Active orders",
+                active.length,
+                "Ready for the next step",
+                "box",
+              ],
+              [
+                "Completed purchases",
+                orders.filter((o) => o.status === "completed").length,
+                "Trades wrapped up",
+                "check",
+              ],
+            ].map(([label, count, sub, icon]) => (
+              <div className="stat" key={label}>
+                <div className="row">
+                  {label}
+                  <Icon name={String(icon)} />
+                </div>
+                <strong>{count}</strong>
+                <small>{sub}</small>
               </div>
-              <button
-                onClick={handleTopUp}
-                className="mt-6 w-full rounded bg-white/20 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/30 backdrop-blur-sm border border-white/30"
-              >
-                + Top Up Test Balance
-              </button>
-            </div>
-
+            ))}
           </div>
-
-          <div className="space-y-6 md:col-span-2">
-            <section className="rounded-lg bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-bold text-gray-800">Recent Orders</h2><Link href="/orders" className="text-sm font-semibold text-blue-600 hover:underline">View all</Link></div>
-              {orders.length === 0 ? (
-                <div className="rounded border-2 border-dashed border-gray-200 p-7 text-center"><p className="text-sm text-gray-500">No orders yet.</p><Link href="/marketplace" className="mt-3 inline-block text-sm font-semibold text-blue-600 hover:underline">Browse Marketplace</Link></div>
+          <div className="grid-two">
+            <section className="panel">
+              <div className="panel-head">
+                <h2>Recent orders</h2>
+                <Link className="text-link" href="/orders">
+                  View all <Icon name="arrow" />
+                </Link>
+              </div>
+              {orders.length ? (
+                orders.slice(0, 3).map((o) => (
+                  <Link className="order-row" key={o.id} href="/orders">
+                    <span className="row">
+                      <ProductImage
+                        src={o.product?.image_url || null}
+                        title={o.product?.title || "Item"}
+                        className="thumb"
+                      />
+                      <span>
+                        <strong>
+                          {o.product?.title || "Item unavailable"}
+                        </strong>
+                        <br />
+                        <small>
+                          {money(o.amount)} · {o.id.slice(0, 8)}
+                        </small>
+                      </span>
+                    </span>
+                    <StatusBadge status={o.status} />
+                  </Link>
+                ))
               ) : (
-                <div className="space-y-3">{orders.slice(0, 3).map((order) => <div key={order.id} className="flex items-center justify-between rounded border border-gray-100 p-3"><div><p className="font-semibold text-gray-800">{order.productTitle}</p><p className="text-xs text-gray-500">GH₵ {order.amount.toFixed(2)}</p></div><span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold capitalize text-blue-700">{order.status.replace('_', ' ')}</span></div>)}</div>
+                <div className="empty">
+                  <h3>Your first trade is waiting.</h3>
+                  <p>Find something useful on the marketplace.</p>
+                  <Link className="btn" href="/marketplace">
+                    Browse items
+                  </Link>
+                </div>
               )}
             </section>
-            
-            {/* Conditional Listing Form */}
-            {showForm && (
-              <div className="rounded-lg bg-white p-6 shadow-md border-t-4 border-green-500 animate-in fade-in slide-in-from-top-4">
-                <h3 className="mb-4 text-lg font-bold text-gray-800">{editingProductId ? 'Edit Listing' : 'Create a Listing'}</h3>
-                <form onSubmit={handleSubmitListing} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Product Title</label>
-                    <input 
-                      type="text" required value={newTitle} onChange={(e) => setNewTitle(e.target.value)}
-                      className="w-full rounded border border-gray-300 p-2 focus:border-green-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Price (GH₵)</label>
-                    <input 
-                      type="number" step="0.01" min="1" required value={newPrice} onChange={(e) => setNewPrice(e.target.value)}
-                      className="w-full rounded border border-gray-300 p-2 focus:border-green-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-                    <textarea 
-                      rows={3} required value={newDescription} onChange={(e) => setNewDescription(e.target.value)}
-                      className="w-full rounded border border-gray-300 p-2 focus:border-green-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Product Image</label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => setImageFile(e.target.files?.[0] || null)}
-                      className="w-full rounded border border-gray-300 p-2 focus:border-green-500 focus:outline-none file:mr-4 file:rounded file:border-0 file:bg-green-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-green-700 hover:file:bg-green-100"
-                    />
-                  </div>
-                  <button 
-                    type="submit" disabled={isSubmitting}
-                    className="w-full rounded bg-green-600 p-2 font-semibold text-white hover:bg-green-700 disabled:bg-gray-400"
-                  >
-                    {isSubmitting ? 'Saving...' : editingProductId ? 'Save Changes' : 'Publish to Marketplace'}
-                  </button>
-                </form>
+            <section className="panel wallet">
+              <div className="row between">
+                <h2>Test wallet</h2>
+                <Icon name="wallet" />
               </div>
-            )}
-
-            {/* User's Products Grid */}
-            <div className="rounded-lg bg-white p-6 shadow-sm">
-              <div className="mb-4 flex items-center justify-between gap-4">
-                <h3 className="text-lg font-bold text-gray-800">Your Inventory</h3>
-                <button
-                  onClick={showForm ? handleCancelForm : () => setShowForm(true)}
-                  className={`rounded-lg px-4 py-2 text-sm font-semibold text-white transition ${showForm ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'}`}
-                >
-                  {showForm ? 'Cancel Listing' : '+ List Product'}
+              <div className="balance">
+                {balance === null ? "Unavailable" : money(balance)}
+              </div>
+              <small className="muted">Available test balance</small>
+              <div className="wallet-held row between small">
+                <span className="muted">Held in escrow</span>
+                <strong>
+                  {money(active.reduce((sum, o) => sum + Number(o.amount), 0))}
+                </strong>
+              </div>
+              <button
+                className="btn lime"
+                onClick={() => {
+                  setActionError("");
+                  setTopUp(true);
+                }}
+              >
+                <Icon name="plus" />
+                Top up test balance
+              </button>
+              <p className="small muted wallet-note">
+                Practice trading. No real money moves.
+              </p>
+            </section>
+          </div>
+          <section className="panel inventory-empty" id="inventory">
+            <div className="panel-head">
+              <h2>Your listings</h2>
+              <button className="text-link" onClick={sell}>
+                <Icon name="plus" />
+                List an item
+              </button>
+            </div>
+            {products.length ? (
+              products.map((p) => (
+                <div className="order-row" key={p.id}>
+                  <div className="row">
+                    <ProductImage
+                      src={p.image_url}
+                      title={p.title}
+                      className="thumb"
+                    />
+                    <div>
+                      <strong>{p.title}</strong>
+                      <p className="small muted">{money(p.price)}</p>
+                    </div>
+                  </div>
+                  <div className="row wrap">
+                    <StatusBadge status={p.status} />
+                    <button
+                      className="btn"
+                      disabled={p.status !== "available"}
+                      onClick={() => setEditing(p)}
+                    >
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="empty">
+                <h3>Your next sale starts here.</h3>
+                <p>
+                  That spare textbook or unused lamp could be someone’s next
+                  great find.
+                </p>
+                <button className="btn primary" onClick={sell}>
+                  <Icon name="plus" />
+                  Create your first listing
                 </button>
               </div>
-              
-              {myProducts.length === 0 ? (
-                <div className="rounded border-2 border-dashed border-gray-200 p-8 text-center text-gray-500">
-                  <p>You haven&apos;t listed any products yet.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {myProducts.map((product) => (
-                    <div key={product.id} className="flex flex-col sm:flex-row sm:items-center justify-between rounded border border-gray-100 p-4 transition hover:bg-gray-50">
-                      <div>
-                        <h4 className="font-semibold text-gray-800">{product.title}</h4>
-                        <p className="text-sm font-medium text-blue-600">GH₵ {product.price.toFixed(2)}</p>
-                      </div>
-                      <div className="mt-3 sm:mt-0 flex items-center gap-3">
-                        {product.status === 'available' && (
-                          <button
-                            type="button"
-                            onClick={() => handleEditClick(product)}
-                            className="text-xs font-semibold text-gray-500 hover:text-blue-600 underline"
-                          >
-                            Edit
-                          </button>
-                        )}
-                        <span className={`px-3 py-1 text-xs font-semibold rounded-full 
-                          ${product.status === 'available' ? 'bg-green-100 text-green-800' : 
-                            product.status === 'in_escrow' ? 'bg-yellow-100 text-yellow-800' : 
-                            'bg-gray-100 text-gray-800'}`}
-                        >
-                          {product.status.replace('_', ' ').toUpperCase()}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            )}
+          </section>
+        </>
+      )}
+      {topUp && (
+        <Modal
+          title="Top up your test wallet"
+          description="Add test funds to practice trading. No real money moves."
+          onClose={() => setTopUp(false)}
+          busy={busy}
+        >
+          <form onSubmit={fund}>
+            <label className="field">
+              Amount (GH₵)
+              <input
+                name="amount"
+                type="number"
+                min="0.01"
+                max="100000"
+                step="0.01"
+                required
+                disabled={busy}
+              />
+            </label>
+            <Feedback error={actionError} />
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={() => setTopUp(false)}
+              >
+                Cancel
+              </button>
+              <button className="btn primary" disabled={busy}>
+                {busy ? "Adding funds…" : "Add test funds"}
+              </button>
             </div>
-
-          </div>
-        </div>
-      </div>
-    </main>
+          </form>
+        </Modal>
+      )}
+      {editing && (
+        <ListingForm
+          userId={userId}
+          campus={profile.campus}
+          product={editing}
+          onSaved={() => setMessage("Listing updated successfully.")}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </>
+  );
+}
+export default function Dashboard() {
+  return (
+    <SiteShell>
+      <DashboardContent />
     </SiteShell>
   );
 }

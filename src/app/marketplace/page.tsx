@@ -1,178 +1,239 @@
-'use client';
+"use client";
+import { useDataRefresh } from "@/lib/use-data-refresh";
+import { Suspense, useCallback, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import {
+  categories,
+  errorMessage,
+  loadProducts,
+  type Product,
+} from "@/lib/marketplace";
+import SiteShell, { useWorkspace } from "../components/SiteShell";
+import ProductCard from "../components/ProductCard";
+import { Feedback, Icon, LoadState, PageHeader } from "../components/UI";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
-import Link from 'next/link';
-import SiteShell from '../components/SiteShell';
-
-interface Product {
-  id: string;
-  title: string;
-  description: string;
-  price: number;
-  image_url: string | null;
-  seller: {
-    full_name: string;
-    trust_score: number;
-  };
-}
-
-export default function Marketplace() {
-  const router = useRouter();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [processingId, setProcessingId] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetchMarketplace();
-  }, []);
-
-  const fetchMarketplace = async () => {
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
-    
-    if (authError || !session) {
-      router.replace('/login');
-      return;
+function MarketplaceContent() {
+  const { userId, sell } = useWorkspace(),
+    params = useSearchParams(),
+    search = params.get("q") || "";
+  const [products, setProducts] = useState<Product[]>([]),
+    [saved, setSaved] = useState<string[]>([]),
+    [category, setCategory] = useState("All items"),
+    [sort, setSort] = useState("recent"),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [actionError, setActionError] = useState(""),
+    [saving, setSaving] = useState<string[]>([]);
+  const savingIds = useRef(new Set<string>());
+  const load = useCallback(async () => {
+    try {
+      const items = await loadProducts(userId),
+        savedIds: string[] = [];
+      for (let from = 0; ; from += 500) {
+        const result = await supabase
+          .from("saved_items")
+          .select("product_id")
+          .eq("user_id", userId)
+          .order("product_id")
+          .range(from, from + 499);
+        if (result.error) throw result.error;
+        savedIds.push(...result.data.map((item) => item.product_id));
+        if (result.data.length < 500) break;
+      }
+      setProducts(items);
+      setSaved(savedIds);
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setLoading(false);
     }
-
-    setUserId(session.user.id);
-
-    // Fetch all 'available' products that do NOT belong to the current user
-    const { data, error } = await supabase
-      .from('products')
-      .select(`
-        id, 
-        title, 
-        description, 
-        price, 
-        image_url,
-        seller_id,
-        profiles!products_seller_id_fkey(full_name, trust_score)
-      `)
-      .eq('status', 'available')
-      .neq('seller_id', session.user.id)
-      .order('created_at', { ascending: false });
-
-    if (data) {
-      // Map the relational data to match our interface
-      const formattedData = data.map((item: any) => ({
-        id: item.id,
-        title: item.title,
-        description: item.description,
-        price: item.price,
-        image_url: item.image_url,
-        seller: {
-          full_name: item.profiles.full_name,
-          trust_score: item.profiles.trust_score,
-        }
-      }));
-      setProducts(formattedData);
+  }, [userId]);
+  useDataRefresh(load);
+  async function toggle(id: string) {
+    if (savingIds.current.has(id)) return;
+    savingIds.current.add(id);
+    setSaving([...savingIds.current]);
+    setActionError("");
+    try {
+      const wasSaved = saved.includes(id);
+      const result = wasSaved
+        ? await supabase
+            .from("saved_items")
+            .delete()
+            .eq("user_id", userId)
+            .eq("product_id", id)
+        : await supabase
+            .from("saved_items")
+            .insert({ user_id: userId, product_id: id });
+      if (result.error) throw result.error;
+      setSaved((current) =>
+        wasSaved ? current.filter((item) => item !== id) : [...current, id],
+      );
+    } catch (cause) {
+      setActionError(errorMessage(cause));
+    } finally {
+      savingIds.current.delete(id);
+      setSaving([...savingIds.current]);
     }
-    setLoading(false);
-  };
-
-  const handlePurchase = async (productId: string) => {
-    if (!userId) return;
-    setProcessingId(productId);
-
-    // Call the exact PostgreSQL Stored Procedure we wrote in Phase 4
-    const { error } = await supabase.rpc('initiate_purchase', {
-      p_product_id: productId
-    });
-
-    setProcessingId(null);
-
-    if (error) {
-      alert(`Transaction Failed: ${error.message}`);
-    } else {
-      alert('Success! Funds moved to Escrow. The seller will be notified.');
-      // Refresh the marketplace to remove the purchased item
-      fetchMarketplace();
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-lg font-medium text-gray-600">Loading marketplace...</p>
-      </div>
-    );
   }
-
+  const visible = products
+    .filter(
+      (p) =>
+        (category === "All items" ||
+          (category === "Saved items"
+            ? saved.includes(p.id)
+            : p.category === category)) &&
+        `${p.title} ${p.description} ${p.category || ""} ${p.location || ""} ${p.campus || ""} ${p.seller?.full_name || ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+    )
+    .sort((a, b) =>
+      sort === "low"
+        ? a.price - b.price
+        : sort === "high"
+          ? b.price - a.price
+          : 0,
+    );
+  const tabs = [
+    ...new Set([
+      "All items",
+      ...categories,
+      ...products.map((p) => p.category).filter((c): c is string => Boolean(c)),
+    ]),
+  ];
   return (
-    <SiteShell title="Marketplace" eyebrow="Discover something useful">
-    <main className="min-h-screen bg-transparent p-0">
-      <div className="mx-auto max-w-5xl">
-        
-        {/* Header Section */}
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">Marketplace</h1>
-            <p className="text-gray-500 mt-1">Safely buy items using ResTrade Escrow.</p>
-          </div>
-          <Link 
-            href="/dashboard"
-            className="rounded bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+    <>
+      <PageHeader
+        title="Marketplace"
+        description="Good finds. Fair prices. Right here on campus."
+        action={
+          <button
+            className="btn"
+            onClick={() =>
+              setCategory(
+                category === "Saved items" ? "All items" : "Saved items",
+              )
+            }
+            aria-pressed={category === "Saved items"}
           >
-            Back to Dashboard
-          </Link>
-        </header>
-
-        {/* Products Grid */}
-        {products.length === 0 ? (
-          <div className="rounded-lg bg-white p-12 text-center shadow-sm">
-            <h2 className="text-xl font-medium text-gray-600">No items available right now.</h2>
-            <p className="text-gray-400 mt-2">Check back later when sellers list new products.</p>
+            <Icon name="heart" />
+            Saved items
+          </button>
+        }
+      />
+      <section className="market-banner">
+        <div>
+          <div className="eyebrow">The campus circular</div>
+          <h2>New semester. Smart finds.</h2>
+          <p>Give pre-loved essentials a new chapter.</p>
+        </div>
+        <div className="banner-side">
+          <span className="banner-stamp">
+            Pass it<strong>ON.</strong>Keep it going
+          </span>
+          <button className="btn lime" onClick={sell}>
+            List your first item <Icon name="arrow" />
+          </button>
+        </div>
+      </section>
+      <button className="btn primary mobile-sell" onClick={sell}>
+        <Icon name="plus" />
+        Sell an item
+      </button>
+      <nav className="category-row" aria-label="Product categories">
+        {tabs.map((c, index) => (
+          <button
+            key={c}
+            className={`category ${category === c ? "active" : ""}`}
+            aria-pressed={category === c}
+            onClick={() => setCategory(c)}
+          >
+            <Icon
+              name={
+                ["grid", "laptop", "book", "shirt", "lamp"][index] || "grid"
+              }
+            />
+            {c}
+          </button>
+        ))}
+      </nav>
+      <Feedback error={actionError} />
+      {loading || error ? (
+        <LoadState loading={loading} error={error} retry={load} />
+      ) : (
+        <>
+          <div className="filter-line">
+            <h2>
+              {search
+                ? `Results for “${search}”`
+                : category === "All items"
+                  ? "Fresh on campus"
+                  : category}
+              <small>{visible.length} items</small>
+            </h2>
+            <label className="small muted">
+              Sort:{" "}
+              <select
+                aria-label="Sort listings"
+                value={sort}
+                onChange={(e) => setSort(e.target.value)}
+              >
+                <option value="recent">Newest first</option>
+                <option value="low">Price: low to high</option>
+                <option value="high">Price: high to low</option>
+              </select>
+            </label>
           </div>
-        ) : (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {products.map((product) => (
-              <div key={product.id} className="flex flex-col justify-between rounded-lg bg-white p-6 shadow-sm border border-gray-100 transition hover:shadow-md">
-                <div>
-                  {product.image_url ? (
-                    <div className="relative mb-4 h-48 w-full overflow-hidden rounded-md border border-gray-100">
-                      <Image
-                        src={product.image_url}
-                        alt={product.title}
-                        fill
-                        unoptimized
-                        sizes="(max-width: 768px) 100vw, (max-width: 1280px) 50vw, 33vw"
-                        className="object-cover"
-                      />
-                    </div>
-                  ) : (
-                    <div className="mb-4 flex h-48 w-full items-center justify-center rounded-md border border-gray-200 bg-gray-100">
-                      <span className="text-sm text-gray-400">No Image</span>
-                    </div>
-                  )}
-                  <h3 className="text-lg font-bold text-gray-800">{product.title}</h3>
-                  <p className="text-sm text-gray-500 mt-2 line-clamp-2">{product.description}</p>
-                  
-                  <div className="mt-4 rounded bg-gray-50 p-3 text-sm">
-                    <p className="text-gray-600">Seller: <span className="font-medium text-gray-800">{product.seller.full_name}</span></p>
-                    <p className="text-gray-600">Trust Score: <span className="font-semibold text-blue-600">{product.seller.trust_score} / 5.0</span></p>
-                  </div>
-                </div>
-
-                <div className="mt-6 flex items-center justify-between border-t pt-4">
-                  <span className="text-xl font-bold text-gray-800">GH₵ {product.price.toFixed(2)}</span>
-                  <button 
-                    onClick={() => handlePurchase(product.id)}
-                    disabled={processingId === product.id}
-                    className="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:bg-gray-400"
-                  >
-                    {processingId === product.id ? 'Processing...' : 'Buy Safely'}
-                  </button>
-                </div>
+          <div className="products">
+            {visible.length ? (
+              visible.map((p) => (
+                <ProductCard
+                  key={p.id}
+                  product={p}
+                  saved={saved.includes(p.id)}
+                  saving={saving.includes(p.id)}
+                  onSave={() => toggle(p.id)}
+                />
+              ))
+            ) : (
+              <div className="empty">
+                <Icon name="search" />
+                <h3>
+                  {category === "Saved items"
+                    ? "Your saved finds will appear here."
+                    : "No items found."}
+                </h3>
+                <p>
+                  {search
+                    ? "Try another keyword or category."
+                    : "Check back for new listings from your campus."}
+                </p>
+                <button
+                  className="btn"
+                  onClick={() => setCategory("All items")}
+                >
+                  Browse all categories
+                </button>
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
-    </main>
+        </>
+      )}
+      <p className="trust-line">
+        <Icon name="shield" />
+        Pay through escrow. Inspect your item before confirming receipt.
+      </p>
+    </>
+  );
+}
+export default function Marketplace() {
+  return (
+    <SiteShell>
+      <Suspense fallback={<LoadState loading />}>
+        <MarketplaceContent />
+      </Suspense>
     </SiteShell>
   );
 }

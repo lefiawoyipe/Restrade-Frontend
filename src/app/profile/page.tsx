@@ -1,40 +1,157 @@
-'use client';
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { errorMessage, initials, notifyDataChanged } from "@/lib/marketplace";
+import SiteShell, { useWorkspace } from "../components/SiteShell";
+import { Feedback, PageHeader } from "../components/UI";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import SiteShell from '../components/SiteShell';
-
-export default function ProfilePage() {
-  const router = useRouter();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [trust, setTrust] = useState(0);
-  const [reviews, setReviews] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-
+function ProfileContent() {
+  const { profile, userId } = useWorkspace();
+  const [name, setName] = useState(profile.full_name || ""),
+    [campus, setCampus] = useState(profile.campus || ""),
+    [bio, setBio] = useState(profile.bio || ""),
+    [email, setEmail] = useState(""),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState(""),
+    [message, setMessage] = useState("");
+  const lock = useRef(false);
   useEffect(() => {
-    const loadProfile = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { router.replace('/login'); return; }
-      setEmail(session.user.email || '');
-      const { data } = await supabase.from('profiles').select('full_name, trust_score, total_reviews').eq('id', session.user.id).single();
-      if (data) { setName(data.full_name || ''); setTrust(data.trust_score || 0); setReviews(data.total_reviews || 0); }
-    };
-    loadProfile();
-  }, [router]);
-
-  const saveProfile = async (event: React.FormEvent) => {
+    supabase.auth.getUser().then(({ data, error: failure }) => {
+      if (failure) setError(failure.message);
+      else setEmail(data.user?.email || "Unavailable");
+    });
+  }, []);
+  async function save(event: React.FormEvent) {
     event.preventDefault();
-    setSaving(true); setMessage('');
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      const { error } = await supabase.from('profiles').update({ full_name: name }).eq('id', session.user.id);
-      setMessage(error ? error.message : 'Profile updated successfully.');
+    if (lock.current) return;
+    if (!name.trim()) {
+      setError("Enter your full name.");
+      return;
     }
-    setSaving(false);
-  };
-
-  return <SiteShell title="Profile" eyebrow="Your public trading identity"><div className="settings-grid"><section className="panel account-card"><div className="profile-avatar">{name.slice(0, 2).toUpperCase() || 'RT'}</div><h2>{name || 'Your profile'}</h2><p>{email}</p><div className="profile-score"><strong>{trust.toFixed(1)}</strong><span>Trust score<br />{reviews} reviews</span></div></section><section className="panel settings-panel"><div className="settings-heading"><div><span className="eyebrow">Personal details</span><h2>Profile information</h2></div></div><form onSubmit={saveProfile} className="settings-form"><label>Full name<input value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Email address<input value={email} readOnly /></label>{message && <p className="form-message">{message}</p>}<button className="button button-primary settings-submit" disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</button></form></section></div></SiteShell>;
+    lock.current = true;
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      const result = await supabase
+        .from("profiles")
+        .update({
+          full_name: name.trim(),
+          campus: campus.trim() || null,
+          bio: bio.trim() || null,
+        })
+        .eq("id", userId)
+        .select("id")
+        .single();
+      if (result.error) throw result.error;
+      notifyDataChanged();
+      setMessage("Profile updated successfully.");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      lock.current = false;
+      setBusy(false);
+    }
+  }
+  return (
+    <>
+      <PageHeader
+        title="Your profile"
+        description="A familiar face makes campus trading feel better."
+      />
+      <div className="profile-grid">
+        <section className="panel profile-top">
+          <div className="avatar">{initials(profile.full_name || "")}</div>
+          <h2>{profile.full_name || "Your profile"}</h2>
+          <p className="muted small">
+            {profile.campus || "Campus not provided"}
+          </p>
+          <div className="rating-big">
+            {profile.total_reviews > 0
+              ? `★ ${Number(profile.trust_score).toFixed(1)}`
+              : "—"}
+          </div>
+          <strong>
+            {profile.total_reviews > 0
+              ? `${profile.total_reviews} reviews`
+              : "No reviews yet"}
+          </strong>
+          <p className="muted small reputation-note">
+            Your reputation grows with feedback from completed trades.
+          </p>
+          {profile.bio && <p className="small preserve-lines">{profile.bio}</p>}
+        </section>
+        <section className="panel">
+          <div className="panel-head">
+            <h2>Profile information</h2>
+          </div>
+          <form onSubmit={save}>
+            <fieldset disabled={busy}>
+              <div className="form-grid">
+                <label className="field full">
+                  Full name
+                  <input
+                    required
+                    maxLength={70}
+                    autoComplete="name"
+                    value={name}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      setMessage("");
+                    }}
+                  />
+                  <small>Shown to other traders.</small>
+                </label>
+                <label className="field full">
+                  Email address
+                  <input value={email} readOnly />
+                  <small>Only visible to you.</small>
+                </label>
+                <label className="field full">
+                  Campus
+                  <input
+                    maxLength={120}
+                    value={campus}
+                    onChange={(e) => {
+                      setCampus(e.target.value);
+                      setMessage("");
+                    }}
+                  />
+                </label>
+                <label className="field full">
+                  About you
+                  <textarea
+                    rows={3}
+                    maxLength={1000}
+                    value={bio}
+                    onChange={(e) => {
+                      setBio(e.target.value);
+                      setMessage("");
+                    }}
+                  />
+                  <small>
+                    Optional. Visible to other traders; keep contact details
+                    private.
+                  </small>
+                </label>
+              </div>
+            </fieldset>
+            <Feedback error={error} message={message} />
+            <div className="form-actions">
+              <button className="btn primary" disabled={busy}>
+                {busy ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </>
+  );
+}
+export default function ProfilePage() {
+  return (
+    <SiteShell>
+      <ProfileContent />
+    </SiteShell>
+  );
 }

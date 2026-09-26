@@ -1,15 +1,20 @@
-import { createServerClient } from '@supabase/ssr';
-import { NextResponse, type NextRequest } from 'next/server';
+import { createServerClient } from "@supabase/ssr";
+import { NextResponse, type NextRequest } from "next/server";
 
-const protectedRoutes = ['/admin', '/dashboard', '/marketplace', '/orders', '/profile', '/settings'];
+const protectedRoutes = [
+  "/admin",
+  "/dashboard",
+  "/marketplace",
+  "/orders",
+  "/profile",
+  "/settings",
+];
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isProtectedRoute = protectedRoutes.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   );
-
-  if (!isProtectedRoute) return NextResponse.next();
 
   let response = NextResponse.next({ request });
   const supabase = createServerClient(
@@ -21,26 +26,56 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value),
+          );
           response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+          cookiesToSet.forEach(({ name, value, options }) =>
+            response.cookies.set(name, value, options),
+          );
         },
       },
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (!user) {
+  const redirect = (url: URL) => {
+    const destination = NextResponse.redirect(url);
+    response.cookies
+      .getAll()
+      .forEach((cookie) => destination.cookies.set(cookie));
+    return destination;
+  };
+
+  if (!user && isProtectedRoute) {
     const loginUrl = request.nextUrl.clone();
-    loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('redirectedFrom', pathname);
-    return NextResponse.redirect(loginUrl);
+    loginUrl.pathname = "/login";
+    loginUrl.searchParams.set("redirectedFrom", pathname);
+    return redirect(loginUrl);
+  }
+
+  if (!user) return response;
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("is_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  const isAdmin = profile?.is_admin === true;
+  if (!isAdmin && (pathname === "/admin" || pathname.startsWith("/admin/"))) {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    dashboardUrl.search = "";
+    return redirect(dashboardUrl);
   }
 
   return response;
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/dashboard/:path*', '/marketplace/:path*', '/orders/:path*', '/profile/:path*', '/settings/:path*'],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

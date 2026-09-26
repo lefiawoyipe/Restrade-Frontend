@@ -1,278 +1,395 @@
-'use client';
+"use client";
+import { useDataRefresh } from "@/lib/use-data-refresh";
+import Link from "next/link";
+import { useCallback, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import {
+  dateLabel,
+  errorMessage,
+  loadOrders,
+  money,
+  notifyDataChanged,
+  type Order,
+} from "@/lib/marketplace";
+import SiteShell, { useWorkspace } from "../components/SiteShell";
+import DisputeCasePanel from "../components/DisputeCasePanel";
+import {
+  Feedback,
+  LoadState,
+  Modal,
+  PageHeader,
+  ProductImage,
+  StatusBadge,
+} from "../components/UI";
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
-import Link from 'next/link';
-import SiteShell from '../components/SiteShell';
-
-interface Order {
-  id: string;
-  amount: number;
-  status: string;
-  product_id: string;
-  product_title: string;
-  seller_id: string;
-  seller_name: string;
-}
-
-export default function Orders() {
-  const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [processingId, setProcessingId] = useState<string | null>(null);
-
-  // Review Form State
-  const [activeReviewOrderId, setActiveReviewOrderId] = useState<string | null>(null);
-  const [rating, setRating] = useState('5');
-  const [comment, setComment] = useState('');
-  const [submittingReview, setSubmittingReview] = useState(false);
-
-  useEffect(() => {
-    fetchOrders();
-  }, []);
-
-  const fetchOrders = async () => {
-    const { data: { session }, error: authError } = await supabase.auth.getSession();
-    
-    if (authError || !session) {
-      router.replace('/login');
-      return;
+function OrderAction({
+  order,
+  kind,
+  onClose,
+  onSuccess,
+}: {
+  order: Order;
+  kind: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { userId } = useWorkspace();
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  const lock = useRef(false);
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (lock.current) return;
+    const values = new FormData(event.currentTarget);
+    lock.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      let result;
+      if (kind === "receipt")
+        result = await supabase.rpc("release_escrow", { p_order_id: order.id });
+      else if (kind === "dispute") {
+        const description = String(values.get("description")).trim();
+        if (!description) throw new Error("Describe what happened.");
+        result = await supabase.rpc("open_dispute", {
+          p_order_id: order.id,
+          p_reason: String(values.get("reason")),
+          p_description: description,
+        });
+      } else
+        result = await supabase.from("reviews").insert({
+          order_id: order.id,
+          reviewer_id: userId,
+          seller_id: order.product?.seller_id,
+          rating: Number(values.get("rating")),
+          comment: String(values.get("comment")).trim(),
+        });
+      if (result.error) throw result.error;
+      notifyDataChanged();
+      onSuccess();
+      onClose();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      lock.current = false;
+      setBusy(false);
     }
-
-    const uid = session.user.id;
-    setUserId(uid);
-
-    // Fetch orders where the current user is the BUYER, joining product and seller details
-    const { data, error } = await supabase
-      .from('orders')
-      .select(`
-        id, 
-        amount, 
-        status, 
-        product_id,
-        products (
-          title,
-          seller_id,
-          profiles!products_seller_id_fkey (full_name)
-        )
-      `)
-      .eq('buyer_id', uid)
-      .order('created_at', { ascending: false });
-
-    if (data) {
-      const formatted: Order[] = data.map((item: any) => ({
-        id: item.id,
-        amount: item.amount,
-        status: item.status,
-        product_id: item.product_id,
-        product_title: item.products?.title || 'Unknown Product',
-        seller_id: item.products?.seller_id,
-        seller_name: item.products?.profiles?.full_name || 'Unknown Seller',
-      }));
-      setOrders(formatted);
-    }
-    setLoading(false);
-  };
-
-  const handleReleaseEscrow = async (orderId: string) => {
-    if (!userId) return;
-    setProcessingId(orderId);
-  
-    // Call our PostgreSQL function to release funds to the seller!
-    const { error } = await supabase.rpc('release_escrow', {
-      p_order_id: orderId
-    });
-
-    setProcessingId(null);
-
-    if (error) {
-      alert(`Failed to release escrow: ${error.message}`);
-    } else {
-      alert('Escrow Released! The seller has received their funds.');
-      fetchOrders(); // Refresh order status to "completed"
-    }
-  };
-
-  const handleRaiseDispute = async (orderId: string) => {
-    if (!userId) return;
-    if (!confirm('Are you sure you want to dispute this order? Funds will be frozen until an Admin reviews it.')) return;
-
-    setProcessingId(orderId);
-    const { error } = await supabase.rpc('raise_dispute', {
-      p_order_id: orderId
-    });
-    setProcessingId(null);
-
-    if (error) {
-      alert(`Error raising dispute: ${error.message}`);
-    } else {
-      alert('Dispute has been raised. Funds are frozen pending admin review.');
-      fetchOrders();
-    }
-  };
-
-  const handleSubmitReview = async (order: Order) => {
-    if (!userId) return;
-    setSubmittingReview(true);
-
-    const { error } = await supabase.from('reviews').insert([
-      {
-        order_id: order.id,
-        reviewer_id: userId,
-        seller_id: order.seller_id,
-        rating: parseInt(rating),
-        comment: comment,
-      }
-    ]);
-
-    setSubmittingReview(false);
-
-    if (error) {
-      alert(`Error submitting review: ${error.message} (You may have already reviewed this order!)`);
-    } else {
-      alert('Review submitted! The seller\'s Trust Score has been dynamically updated.');
-      setActiveReviewOrderId(null);
-      setComment('');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50">
-        <p className="text-lg font-medium text-gray-600">Loading your escrow transactions...</p>
-      </div>
-    );
   }
-
   return (
-    <SiteShell title="My orders" eyebrow="Your trading activity">
-    <main className="min-h-screen bg-transparent p-0">
-      <div className="mx-auto max-w-4xl">
-        
-        {/* Header Section */}
-        <header className="mb-8 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800">My Escrow Orders</h1>
-            <p className="text-gray-500 mt-1">Manage your purchases and release funds when items arrive.</p>
-          </div>
-          <Link 
-            href="/dashboard"
-            className="rounded bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-300"
+    <Modal
+      title={
+        kind === "receipt"
+          ? "Received and checked your item?"
+          : kind === "dispute"
+            ? "Report a problem"
+            : "How was your trade?"
+      }
+      description={
+        kind === "receipt"
+          ? `Confirming releases ${money(order.amount)} to the seller. Make sure the item matches its description first.`
+          : order.product?.title || "Your order"
+      }
+      onClose={onClose}
+      busy={busy}
+    >
+      <form onSubmit={submit}>
+        <fieldset disabled={busy}>
+          {kind === "receipt" ? (
+            <label className="receipt-check">
+              <input type="checkbox" required />I have received and inspected
+              the item.
+            </label>
+          ) : kind === "dispute" ? (
+            <div className="stack">
+              <label className="field">
+                Reason
+                <select name="reason" required>
+                  <option value="">Choose a reason</option>
+                  <option>Item not as described</option>
+                  <option>Item not received</option>
+                  <option>Damaged or faulty item</option>
+                  <option>Other issue</option>
+                </select>
+              </label>
+              <label className="field">
+                What happened?
+                <textarea
+                  name="description"
+                  rows={4}
+                  required
+                  maxLength={5000}
+                />
+              </label>
+              <p className="note">
+                Funds stay held while the case is reviewed. After submitting,
+                open the case to attach photos or documents and add responses.
+              </p>
+            </div>
+          ) : (
+            <div className="stack">
+              <label className="field">
+                Rating
+                <select name="rating" required defaultValue="">
+                  <option value="">Choose a rating</option>
+                  {[5, 4, 3, 2, 1].map((r) => (
+                    <option value={r} key={r}>
+                      {r} {r === 1 ? "star" : "stars"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                Your review
+                <textarea
+                  name="comment"
+                  rows={3}
+                  maxLength={5000}
+                  placeholder="Share helpful feedback about the trade."
+                />
+              </label>
+            </div>
+          )}
+        </fieldset>
+        <Feedback error={error} />
+        <div className="form-actions">
+          <button
+            className="btn"
+            type="button"
+            disabled={busy}
+            onClick={onClose}
           >
-            Back to Dashboard
-          </Link>
-        </header>
-
-        {/* Orders List */}
-        {orders.length === 0 ? (
-          <div className="rounded-lg bg-white p-12 text-center shadow-sm">
-            <h2 className="text-xl font-medium text-gray-600">No active orders found.</h2>
-            <p className="text-gray-400 mt-2">Visit the marketplace to start trading safely!</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {orders.map((order) => (
-              <div key={order.id} className="rounded-lg bg-white p-6 shadow-sm border border-gray-100">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">Order ID: {order.id.slice(0, 8)}...</span>
-                    <h3 className="text-xl font-bold text-gray-800 mt-1">{order.product_title}</h3>
-                    <p className="text-sm text-gray-600 mt-1">
-                      Seller: <span className="font-semibold text-gray-800">{order.seller_name}</span> | 
-                      Amount Locked: <span className="font-bold text-blue-600">GH₵ {order.amount.toFixed(2)}</span>
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-2">
-                    <span className={`px-3 py-1 text-xs font-bold rounded-full 
-                      ${order.status === 'escrow_funded' ? 'bg-yellow-100 text-yellow-800 border border-yellow-300' : 
-                        order.status === 'completed' ? 'bg-green-100 text-green-800 border border-green-300' : 
-                        'bg-gray-100 text-gray-800'}`}
-                    >
-                      {order.status === 'escrow_funded' ? '🔒 FUNDS IN ESCROW' : order.status.toUpperCase()}
-                    </span>
-
-                    {/* Action Button: Release Escrow */}
-                    {order.status === 'escrow_funded' && (
-                      <button
-                        onClick={() => handleReleaseEscrow(order.id)}
-                        disabled={processingId === order.id}
-                        className="rounded bg-green-600 px-4 py-2 text-sm font-bold text-white shadow transition hover:bg-green-700 disabled:bg-gray-400"
-                      >
-                        {processingId === order.id ? 'Releasing...' : '✓ Confirm Receipt & Release Funds'}
-                      </button>
-                    )}
-
-                    {/* Action Button: Dispute Order */}
-                    {order.status === 'escrow_funded' && (
-                      <button
-                        onClick={() => handleRaiseDispute(order.id)}
-                        disabled={processingId === order.id}
-                        className="rounded border border-red-500 bg-red-50 px-4 py-2 text-xs font-bold text-red-600 transition hover:bg-red-100 disabled:opacity-50"
-                      >
-                        ⚠️ Report Issue / Dispute
-                      </button>
-                    )}
-
-                    {/* Action Button: Leave Review */}
-                    {order.status === 'completed' && (
-                      <button
-                        onClick={() => setActiveReviewOrderId(activeReviewOrderId === order.id ? null : order.id)}
-                        className="text-sm font-semibold text-blue-600 hover:underline"
-                      >
-                        {activeReviewOrderId === order.id ? 'Close Review Form' : '★ Leave Seller Review'}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Inline Review Form */}
-                {activeReviewOrderId === order.id && (
-                  <div className="mt-6 border-t pt-4 bg-gray-50 -mx-6 -mb-6 p-6 rounded-b-lg animate-in fade-in">
-                    <h4 className="font-bold text-gray-800 mb-3">Rate your experience with {order.seller_name}</h4>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Rating</label>
-                        <select 
-                          value={rating} 
-                          onChange={(e) => setRating(e.target.value)}
-                          className="rounded border border-gray-300 p-2 text-sm bg-white font-medium focus:outline-none focus:border-blue-500"
-                        >
-                          <option value="5">★★★★★ (5/5) - Excellent & Trustworthy</option>
-                          <option value="4">★★★★☆ (4/5) - Good Transaction</option>
-                          <option value="3">★★★☆☆ (3/5) - Average</option>
-                          <option value="2">★★☆☆☆ (2/5) - Poor Experience</option>
-                          <option value="1">★☆☆☆☆ (1/5) - Fraudulent / Bad</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-bold text-gray-600 uppercase mb-1">Comment</label>
-                        <input
-                          type="text"
-                          placeholder="e.g., Laptop was exactly as described, smooth transaction!"
-                          value={comment}
-                          onChange={(e) => setComment(e.target.value)}
-                          className="w-full rounded border border-gray-300 p-2 text-sm focus:outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleSubmitReview(order)}
-                        disabled={submittingReview}
-                        className="rounded bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700 disabled:bg-gray-400"
-                      >
-                        {submittingReview ? 'Submitting...' : 'Submit Review'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+            {kind === "receipt" ? "Not yet" : "Cancel"}
+          </button>
+          <button className="btn primary" disabled={busy}>
+            {busy
+              ? "Submitting…"
+              : kind === "receipt"
+                ? "Confirm & release funds"
+                : kind === "dispute"
+                  ? "Submit dispute"
+                  : "Submit review"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function OrdersContent() {
+  const { userId } = useWorkspace();
+  const [orders, setOrders] = useState<Order[]>([]),
+    [reviewed, setReviewed] = useState<string[]>([]),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [tab, setTab] = useState("All orders"),
+    [view, setView] = useState("purchases"),
+    [action, setAction] = useState<{ order: Order; kind: string } | null>(null),
+    [caseOrder, setCaseOrder] = useState<Order | null>(null),
+    [message, setMessage] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const activity = await loadOrders(),
+        ids: string[] = [];
+      for (let from = 0; ; from += 500) {
+        const reviews = await supabase
+          .from("reviews")
+          .select("order_id")
+          .eq("reviewer_id", userId)
+          .order("order_id")
+          .range(from, from + 499);
+        if (reviews.error) throw reviews.error;
+        ids.push(...reviews.data.map((r) => r.order_id));
+        if (reviews.data.length < 500) break;
+      }
+      setOrders(activity);
+      setReviewed(ids);
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [userId]);
+  useDataRefresh(load);
+  const visible = orders.filter(
+    (o) =>
+      (view === "purchases"
+        ? o.buyer_id === userId
+        : o.product?.seller_id === userId) &&
+      (tab === "All orders" ||
+        (tab === "Active" && ["pending", "escrow_funded"].includes(o.status)) ||
+        (tab === "Completed" && o.status === "completed") ||
+        (tab === "Disputed" && o.status === "disputed") ||
+        (tab === "Refunded" && o.status === "refunded")),
+  );
+  return (
+    <>
+      <PageHeader
+        title="Your orders"
+        description="Know where your money is, and what happens next."
+        action={
+          <label className="small muted">
+            View{" "}
+            <select
+              aria-label="Order role"
+              className="role-select"
+              value={view}
+              onChange={(e) => setView(e.target.value)}
+            >
+              <option value="purchases">My purchases</option>
+              <option value="sales">My sales</option>
+            </select>
+          </label>
+        }
+      />
+      <div className="tabs" aria-label="Filter orders">
+        {["All orders", "Active", "Completed", "Disputed", "Refunded"].map(
+          (t) => (
+            <button
+              key={t}
+              className={`tab ${tab === t ? "active" : ""}`}
+              aria-pressed={tab === t}
+              onClick={() => setTab(t)}
+            >
+              {t}
+            </button>
+          ),
         )}
       </div>
-    </main>
+      <Feedback message={message} />
+      {loading || error ? (
+        <LoadState loading={loading} error={error} retry={load} />
+      ) : visible.length ? (
+        visible.map((o) => (
+          <article className="order-card" key={o.id}>
+            <div className="order-top">
+              <div className="row">
+                <ProductImage
+                  className="thumb"
+                  src={o.product?.image_url || null}
+                  title={o.product?.title || "Item"}
+                />
+                <div>
+                  <small className="muted">
+                    {o.id.slice(0, 8).toUpperCase()} · {dateLabel(o.created_at)}
+                  </small>
+                  <h3>{o.product?.title || "Item unavailable"}</h3>
+                  <span className="small muted">
+                    {view === "purchases"
+                      ? `Seller: ${o.product?.seller?.full_name || "Unavailable"}`
+                      : `Buyer: ${o.buyer?.full_name || "Unavailable"}`}{" "}
+                    ·{" "}
+                    {o.product?.location ||
+                      o.product?.campus ||
+                      "Collection area not provided"}
+                  </span>
+                </div>
+              </div>
+              <div className="order-amount">
+                <strong>{money(o.amount)}</strong>
+                <StatusBadge status={o.status} />
+              </div>
+            </div>
+            {o.status === "escrow_funded" && (
+              <div className="timeline">
+                <div className="step done">
+                  <strong>1. Payment held</strong>Your funds are in escrow
+                </div>
+                <div className="step">
+                  <strong>2. Collect & inspect</strong>Arrange collection and
+                  check the item
+                </div>
+                <div className="step">
+                  <strong>3. Confirm receipt</strong>The buyer releases payment
+                </div>
+              </div>
+            )}
+            <div className="order-bottom">
+              <p>
+                {o.status === "escrow_funded"
+                  ? "Only confirm after receiving and checking the item."
+                  : o.status === "completed"
+                    ? "Payment released. Your trade is complete."
+                    : o.status === "refunded"
+                      ? "Funds returned to the buyer."
+                      : "Payment is held while the dispute is reviewed."}
+              </p>
+              <div className="row wrap">
+                {o.status === "escrow_funded" && o.buyer_id === userId && (
+                  <>
+                    <button
+                      className="btn"
+                      onClick={() => setAction({ order: o, kind: "dispute" })}
+                    >
+                      Report a problem
+                    </button>
+                    <button
+                      className="btn primary"
+                      onClick={() => setAction({ order: o, kind: "receipt" })}
+                    >
+                      Confirm receipt
+                    </button>
+                  </>
+                )}
+                {o.status === "completed" && o.buyer_id === userId && (
+                  <button
+                    className="btn"
+                    disabled={reviewed.includes(o.id)}
+                    onClick={() => setAction({ order: o, kind: "review" })}
+                  >
+                    {reviewed.includes(o.id)
+                      ? "Review submitted"
+                      : "Leave a review"}
+                  </button>
+                )}
+                {["disputed", "refunded"].includes(o.status) && (
+                  <button className="btn" onClick={() => setCaseOrder(o)}>
+                    View case
+                  </button>
+                )}
+              </div>
+            </div>
+          </article>
+        ))
+      ) : (
+        <div className="empty">
+          <h3>No orders here yet.</h3>
+          <p>Your matching orders will appear here.</p>
+          <Link className="btn primary" href="/marketplace">
+            Browse marketplace
+          </Link>
+        </div>
+      )}
+      {action && (
+        <OrderAction
+          order={action.order}
+          kind={action.kind}
+          onSuccess={() =>
+            setMessage(
+              action.kind === "receipt"
+                ? "Receipt confirmed. Payment released to the seller."
+                : action.kind === "dispute"
+                  ? "Dispute opened. Use View case to add evidence or responses."
+                  : "Review submitted. Thank you for your feedback.",
+            )
+          }
+          onClose={() => {
+            setAction(null);
+          }}
+        />
+      )}
+      {caseOrder && (
+        <DisputeCasePanel
+          order={caseOrder}
+          onClose={() => setCaseOrder(null)}
+        />
+      )}
+    </>
+  );
+}
+export default function Orders() {
+  return (
+    <SiteShell>
+      <OrdersContent />
     </SiteShell>
   );
 }

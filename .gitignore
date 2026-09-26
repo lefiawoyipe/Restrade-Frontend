@@ -43,3 +43,10 @@ next-env.d.ts
 AGENTS.md
 CLAUDE.md
 .env.local
+# Local browser-test output
+/test-results/
+/playwright-report/
+/artifacts/screenshots/
+
+#reference alignment
+/reference-alignment.md/

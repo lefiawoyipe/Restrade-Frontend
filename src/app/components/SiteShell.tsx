@@ -1,101 +1,308 @@
-'use client';
+"use client";
+import { useDataRefresh } from "@/lib/use-data-refresh";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { supabase } from "@/lib/supabase";
+import { errorMessage, initials, type Profile } from "@/lib/marketplace";
+import { Feedback, Icon, LoadState } from "./UI";
+import ListingForm from "./ListingForm";
 
-import Link from 'next/link';
-import Image from 'next/image';
-import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
-import SiteFooter from './SiteFooter';
-import overviewIcon from '@/icon images/overview.png';
-import marketplaceIcon from '@/icon images/marketplace.png';
-import ordersIcon from '@/icon images/orders.png';
-import profileIcon from '@/icon images/profile.png';
-import settingsIcon from '@/icon images/settings.png';
-import logoutIcon from '@/icon images/logout.png';
-import goBackIcon from '@/icon images/goback.png';
-
-const navigation = [
-  { href: '/dashboard', label: 'Overview', icon: overviewIcon },
-  { href: '/marketplace', label: 'Marketplace', icon: marketplaceIcon },
-  { href: '/orders', label: 'Orders', icon: ordersIcon },
+interface Workspace {
+  userId: string;
+  profile: Profile;
+  sell: () => void;
+}
+const Context = createContext<Workspace | null>(null);
+export function useWorkspace() {
+  const value = useContext(Context);
+  if (!value) throw new Error("Workspace is not ready");
+  return value;
+}
+export function Brand() {
+  return (
+    <Link className="brand" href="/" aria-label="ResTrade home">
+      <span className="brand-mark">r</span>
+      <span>
+        ResTrade<span className="brand-dot">.</span>
+      </span>
+    </Link>
+  );
+}
+const mainLinks = [
+  ["/dashboard", "Overview", "grid"],
+  ["/marketplace", "Marketplace", "shop"],
+  ["/orders", "Orders", "box"],
+];
+const accountLinks = [
+  ["/profile", "My profile", "user"],
+  ["/settings", "Settings", "settings"],
 ];
 
-export default function SiteShell({ children, title, eyebrow }: { children: React.ReactNode; title?: string; eyebrow?: string }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [timeGreeting, setTimeGreeting] = useState('Good morning');
-  const [profileInitials, setProfileInitials] = useState('RT');
-
-  useEffect(() => {
-    const greetingTimer = window.setTimeout(() => {
-      const hour = new Date().getUTCHours();
-      setTimeGreeting(hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening');
-    }, 0);
-
-    return () => window.clearTimeout(greetingTimer);
-  }, []);
-
-  useEffect(() => {
-    const loadProfileInitials = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('id', session.user.id)
+export default function SiteShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname(),
+    router = useRouter();
+  const [account, setAccount] = useState<{
+    userId: string;
+    profile: Profile;
+  } | null>(null);
+  const [error, setError] = useState(""),
+    [loading, setLoading] = useState(true),
+    [listing, setListing] = useState(false),
+    [drawer, setDrawer] = useState(false),
+    [query, setQuery] = useState(""),
+    [message, setMessage] = useState(""),
+    [logoutBusy, setLogoutBusy] = useState(false);
+  const sidebar = useRef<HTMLElement>(null),
+    menu = useRef<HTMLButtonElement>(null);
+  const load = useCallback(async () => {
+    try {
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError) throw authError;
+      if (!user) {
+        router.replace(`/login?redirectedFrom=${encodeURIComponent(pathname)}`);
+        return;
+      }
+      const { data, error: profileError } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
         .single();
-
-      const fullName = profile?.full_name || session.user.user_metadata?.full_name || '';
-      if (fullName) setProfileInitials(fullName.slice(0, 2).toUpperCase());
-    };
-
-    loadProfileInitials();
-  }, []);
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.replace('/login');
-  };
-
-  const handleGoBack = () => {
-    if (window.history.length > 1) {
-      router.back();
-    } else {
-      router.push('/dashboard');
+      if (profileError) throw profileError;
+      if (pathname.startsWith("/admin") && !data.is_admin) {
+        router.replace("/dashboard");
+        return;
+      }
+      setAccount({ userId: user.id, profile: data });
+      setError("");
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setLoading(false);
     }
-  };
-
-  return (
-    <div className={`app-frame ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`}>
-      <button className="sidebar-overlay" aria-label="Close navigation" onClick={() => setSidebarOpen(false)} />
-      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
-        <Link href="/dashboard" className="brand" title="ResTrade home"><span className="brand-mark">R</span> ResTrade</Link>
-        <p className="nav-label">Workspace</p>
-        <nav className="side-nav" aria-label="Main navigation">
-          {navigation.map((item) => (
-            <Link key={item.href} href={item.href} aria-label={item.label} title={sidebarOpen ? undefined : item.label} className={`side-link ${pathname === item.href ? 'active' : ''}`}>
-              <span className="side-icon"><Image src={item.icon} alt="" width={18} height={18} /></span>{item.label}
-            </Link>
-          ))}
-        </nav>
-        <div className="sidebar-spacer" />
-        <div className="help-box"><strong>Trade with confidence</strong><span>Every purchase is protected by escrow.</span></div>
-        <nav className="side-nav" aria-label="Account navigation">
-          <Link href="/profile" aria-label="Profile" title={sidebarOpen ? undefined : 'Profile'} className="side-link"><span className="side-icon"><Image src={profileIcon} alt="" width={18} height={18} /></span>Profile</Link>
-          <Link href="/settings" aria-label="Settings" title={sidebarOpen ? undefined : 'Settings'} className="side-link"><span className="side-icon"><Image src={settingsIcon} alt="" width={18} height={18} /></span>Settings</Link>
-          <button type="button" aria-label="Log Out" title={sidebarOpen ? undefined : 'Log Out'} className="side-link logout-link" onClick={handleLogout}><span className="side-icon"><Image src={logoutIcon} alt="" width={18} height={18} /></span>Log Out</button>
-        </nav>
-      </aside>
-      <div className="app-content">
-        <header className="topbar">
-          <div className="topbar-heading"><button className="sidebar-toggle" type="button" title={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-label={sidebarOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(!sidebarOpen)}><span aria-hidden="true">{sidebarOpen ? '×' : '☰'}</span></button><div><span className="topbar-eyebrow">{eyebrow === 'Good morning' ? timeGreeting : eyebrow || 'ResTrade workspace'}</span>{title && <h1 className="topbar-title">{title}</h1>}</div></div>
-          <div className="topbar-actions">{pathname === '/marketplace' ? <button type="button" className="back-button" onClick={handleGoBack} title="Go back" aria-label="Go back"><Image src={goBackIcon} alt="" width={24} height={24} /></button> : <Link href="/marketplace" className="button button-primary button-small">Browse marketplace</Link>}<Link href="/profile" className="avatar-link" title="Open profile" aria-label="Open profile"><span className="avatar">{profileInitials}</span></Link></div>
-        </header>
-        <main className="page-content">{children}</main>
-        <SiteFooter />
+  }, [pathname, router]);
+  useDataRefresh(load);
+  useEffect(() => {
+    if (!drawer) return;
+    const opener = menu.current;
+    const element = sidebar.current,
+      prior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    element?.querySelector<HTMLElement>("a,button")?.focus();
+    function keys(event: KeyboardEvent) {
+      if (event.key === "Escape") setDrawer(false);
+      if (event.key !== "Tab") return;
+      const nodes = Array.from(
+          element?.querySelectorAll<HTMLElement>("a,button") || [],
+        ).filter((e) => e.getClientRects().length > 0),
+        first = nodes[0],
+        last = nodes.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last?.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first?.focus();
+      }
+    }
+    const media = window.matchMedia("(min-width: 681px)"),
+      resize = () => {
+        if (media.matches) setDrawer(false);
+      };
+    document.addEventListener("keydown", keys);
+    media.addEventListener("change", resize);
+    return () => {
+      document.body.style.overflow = prior;
+      document.removeEventListener("keydown", keys);
+      media.removeEventListener("change", resize);
+      opener?.focus();
+    };
+  }, [drawer]);
+  async function logout() {
+    setLogoutBusy(true);
+    const { error: failure } = await supabase.auth.signOut();
+    if (failure) {
+      setError(failure.message);
+      setLogoutBusy(false);
+    } else {
+      router.replace("/login");
+      router.refresh();
+    }
+  }
+  const nav = (items: string[][]) =>
+    items.map(([href, label, icon]) => (
+      <Link
+        key={href}
+        href={href}
+        className={`nav-link ${pathname === href || pathname.startsWith(`${href}/`) ? "active" : ""}`}
+        aria-current={
+          pathname === href || pathname.startsWith(`${href}/`)
+            ? "page"
+            : undefined
+        }
+        onClick={() => setDrawer(false)}
+      >
+        <Icon name={icon} />
+        {label}
+      </Link>
+    ));
+  if (!account)
+    return (
+      <div className="startup">
+        <Brand />
+        <LoadState loading={loading} error={error} retry={load} />
       </div>
-    </div>
+    );
+  return (
+    <Context.Provider value={{ ...account, sell: () => setListing(true) }}>
+      <a className="skip" href="#main">
+        Skip to content
+      </a>
+      {drawer && (
+        <div
+          className="drawer-backdrop"
+          onClick={() => setDrawer(false)}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        ref={sidebar}
+        className={`sidebar ${drawer ? "open" : ""}`}
+        aria-label="Navigation"
+        role={drawer ? "dialog" : undefined}
+        aria-modal={drawer || undefined}
+      >
+        <Brand />
+        <button
+          className="drawer-close btn"
+          onClick={() => setDrawer(false)}
+          aria-label="Close navigation"
+        >
+          <Icon name="close" />
+        </button>
+        <div className="nav-label">Your campus, connected</div>
+        <nav aria-label="Main navigation">{nav(mainLinks)}</nav>
+        <div className="nav-label">Your account</div>
+        <nav aria-label="Account navigation">
+          {nav(accountLinks)}
+          {account.profile.is_admin &&
+            nav([["/admin", "Administration", "shield"]])}
+        </nav>
+        <div className="side-bottom">
+          <div className="protect-card">
+            <Icon name="shield" />
+            <br />
+            <strong>A little more peace of mind.</strong>
+            <p>
+              Learn when your payment is held and when it reaches the seller.
+            </p>
+            <Link className="text-link" href="/about">
+              How escrow works <Icon name="arrow" />
+            </Link>
+          </div>
+          <Link className="nav-link" href="/">
+            <Icon name="back" />
+            Back to home
+          </Link>
+          <button
+            className="nav-link logout"
+            disabled={logoutBusy}
+            onClick={logout}
+          >
+            <Icon name="logout" />
+            {logoutBusy ? "Logging out…" : "Log out"}
+          </button>
+          <Link
+            className="user-card"
+            href="/profile"
+            onClick={() => setDrawer(false)}
+          >
+            <span className="avatar">
+              {initials(account.profile.full_name || "")}
+            </span>
+            <span>
+              <strong>{account.profile.full_name || "Your account"}</strong>
+              <br />
+              <small className="muted">
+                {account.profile.is_admin ? "Administrator" : "Student account"}
+              </small>
+            </span>
+          </Link>
+        </div>
+      </aside>
+      <div className="main-wrap" inert={drawer || undefined}>
+        <header className="topbar">
+          <button
+            ref={menu}
+            className="mobile-menu"
+            aria-label="Open navigation"
+            aria-expanded={drawer}
+            onClick={() => setDrawer(true)}
+          >
+            <Icon name="menu" />
+          </button>
+          <form
+            className="search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              router.push(`/marketplace?q=${encodeURIComponent(query.trim())}`);
+            }}
+          >
+            <Icon name="search" />
+            <input
+              name="query"
+              aria-label="Search marketplace"
+              placeholder="Search for your next campus find…"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <button className="search-submit" type="submit" aria-label="Search">
+              <Icon name="arrow" />
+            </button>
+          </form>
+          <div className="top-actions">
+            {account.profile.campus && (
+              <span className="campus">
+                <Icon name="pin" />
+                {account.profile.campus}
+              </span>
+            )}
+            <button className="btn primary" onClick={() => setListing(true)}>
+              <Icon name="plus" />
+              Sell an item
+            </button>
+            <Link className="avatar" href="/profile" aria-label="Your profile">
+              {initials(account.profile.full_name || "")}
+            </Link>
+          </div>
+        </header>
+        <main id="main" className="page" tabIndex={-1}>
+          <Feedback error={error} message={message} />
+          {children}
+        </main>
+      </div>
+      {listing && (
+        <ListingForm
+          userId={account.userId}
+          campus={account.profile.campus}
+          onSaved={() =>
+            setMessage(
+              "Listing published. Your item is now available on the marketplace.",
+            )
+          }
+          onClose={() => setListing(false)}
+        />
+      )}
+    </Context.Provider>
   );
 }
