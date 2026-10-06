@@ -9,6 +9,7 @@ export const profile = {
   total_reviews: 3,
   trust_score: 4.7,
   is_admin: false,
+  is_suspended: false,
 };
 export const products = [
   "Study laptop",
@@ -36,6 +37,7 @@ export const products = [
   location: "Library",
   campus: "Test campus",
   status: "available",
+  moderation_status: "visible",
   created_at: "2026-09-25T12:00:00Z",
   seller: { ...profile, id: sellerId, full_name: "Sam Seller" },
 }));
@@ -53,6 +55,8 @@ export async function mockBackend(
   page: Page,
   options: {
     admin?: boolean;
+    suspended?: boolean;
+    failRecommendation?: boolean;
     failProducts?: boolean;
     failWallet?: boolean;
     failRelease?: boolean;
@@ -70,8 +74,10 @@ export async function mockBackend(
     order_alerts: true,
     marketplace_updates: false,
   };
+  let emailEnabled = false;
   const currentOrder = {
     ...order,
+    buyer_id: options.admin ? sellerId : uid,
     status: options.admin ? "disputed" : order.status,
   };
   const user = {
@@ -118,12 +124,53 @@ export async function mockBackend(
       });
     if (method === "OPTIONS") return json({});
     if (url.pathname.includes("/auth/v1/user")) return json(user);
-    if (name === "profiles")
+    if (name === "profiles") {
+      if (url.searchParams.get("select") === "*") {
+        const rows = [
+          {
+            ...profile,
+            is_admin: Boolean(options.admin),
+            is_suspended: Boolean(options.suspended),
+          },
+          { ...profile, id: sellerId, full_name: "Sam Seller" },
+        ];
+        if (!url.searchParams.has("id")) return json(rows);
+      }
       return json({
         ...profile,
         is_admin: Boolean(options.admin),
+        is_suspended: Boolean(options.suspended),
         ...(method === "PATCH" ? body : {}),
       });
+    }
+    if (name === "product_categories")
+      return json(
+        ["Electronics", "Books", "Fashion", "Room essentials"].map((name) => ({
+          name,
+        })),
+      );
+    if (name === "data_versions")
+      return json([
+        { topic: "marketplace", version: 1 },
+        { topic: `user:${uid}`, version: 1 },
+      ]);
+    if (name === "recommendation_preferences")
+      return json(emailEnabled ? { email_enabled: true } : null);
+    if (name === "set_recommendation_email") {
+      if (options.failRecommendation)
+        return json({ message: "Preference could not be saved" }, 400);
+      emailEnabled = Boolean(body.p_enabled);
+      return json(null);
+    }
+    if (
+      [
+        "unsubscribe_recommendations",
+        "admin_moderate_product",
+        "admin_suspend_trading",
+      ].includes(name)
+    )
+      return json(null);
+    if (name === "admin_audit_log") return json([]);
     if (name === "products") {
       if (options.failProducts)
         return json({ message: "Listings temporarily unavailable" }, 503);
@@ -137,6 +184,12 @@ export async function mockBackend(
         : products;
       const from = Number(url.searchParams.get("offset") || 0),
         limit = Number(url.searchParams.get("limit") || 500);
+      if (url.searchParams.has("id"))
+        return json(
+          items.find(
+            (p) => p.id === url.searchParams.get("id")?.replace("eq.", ""),
+          ) ?? null,
+        );
       return json(items.slice(from, from + limit));
     }
     if (name === "saved_items") {

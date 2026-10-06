@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { errorMessage, initials, type Profile } from "@/lib/marketplace";
 import { Feedback, Icon, LoadState } from "./UI";
+import AdminShell from "./AdminShell";
 import ListingForm from "./ListingForm";
 
 interface Workspace {
@@ -79,19 +80,33 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
         .eq("id", user.id)
         .single();
       if (profileError) throw profileError;
-      if (pathname.startsWith("/admin") && !data.is_admin) {
-        router.replace("/dashboard");
+      if (
+        pathname.startsWith("/admin") &&
+        (!data.is_admin || data.is_suspended)
+      ) {
+        router.replace(data.is_admin ? "/settings" : "/dashboard");
+        return;
+      }
+      if (
+        data.is_admin &&
+        ["/dashboard", "/marketplace", "/orders"].some(
+          (route) => pathname === route || pathname.startsWith(`${route}/`),
+        )
+      ) {
+        router.replace(data.is_suspended ? "/settings" : "/admin");
         return;
       }
       setAccount({ userId: user.id, profile: data });
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [pathname, router]);
-  useDataRefresh(load);
+  useDataRefresh(load, ["personal"]);
   useEffect(() => {
     if (!drawer) return;
     const opener = menu.current;
@@ -164,7 +179,15 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
       </div>
     );
   return (
-    <Context.Provider value={{ ...account, sell: () => setListing(true) }}>
+    <Context.Provider
+      value={{
+        ...account,
+        sell: () => {
+          if (!account.profile.is_admin && !account.profile.is_suspended)
+            setListing(true);
+        },
+      }}
+    >
       <a className="skip" href="#main">
         Skip to content
       </a>
@@ -191,13 +214,13 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
           <Icon name="close" />
         </button>
         <div className="nav-label">Your campus, connected</div>
-        <nav aria-label="Main navigation">{nav(mainLinks)}</nav>
+        {account.profile.is_admin ? (
+          <AdminShell close={() => setDrawer(false)} />
+        ) : (
+          <nav aria-label="Main navigation">{nav(mainLinks)}</nav>
+        )}
         <div className="nav-label">Your account</div>
-        <nav aria-label="Account navigation">
-          {nav(accountLinks)}
-          {account.profile.is_admin &&
-            nav([["/admin", "Administration", "shield"]])}
-        </nav>
+        <nav aria-label="Account navigation">{nav(accountLinks)}</nav>
         <div className="side-bottom">
           <div className="protect-card">
             <Icon name="shield" />
@@ -251,25 +274,33 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
           >
             <Icon name="menu" />
           </button>
-          <form
-            className="search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              router.push(`/marketplace?q=${encodeURIComponent(query.trim())}`);
-            }}
-          >
-            <Icon name="search" />
-            <input
-              name="query"
-              aria-label="Search marketplace"
-              placeholder="Search for your next campus find…"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <button className="search-submit" type="submit" aria-label="Search">
-              <Icon name="arrow" />
-            </button>
-          </form>
+          {!account.profile.is_admin && (
+            <form
+              className="search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                router.push(
+                  `/marketplace?q=${encodeURIComponent(query.trim())}`,
+                );
+              }}
+            >
+              <Icon name="search" />
+              <input
+                name="query"
+                aria-label="Search marketplace"
+                placeholder="Search for your next campus find…"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+              <button
+                className="search-submit"
+                type="submit"
+                aria-label="Search"
+              >
+                <Icon name="arrow" />
+              </button>
+            </form>
+          )}
           <div className="top-actions">
             {account.profile.campus && (
               <span className="campus">
@@ -277,10 +308,16 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
                 {account.profile.campus}
               </span>
             )}
-            <button className="btn primary" onClick={() => setListing(true)}>
-              <Icon name="plus" />
-              Sell an item
-            </button>
+            {!account.profile.is_admin && (
+              <button
+                className="btn primary"
+                disabled={account.profile.is_suspended}
+                onClick={() => setListing(true)}
+              >
+                <Icon name="plus" />
+                Sell an item
+              </button>
+            )}
             <Link className="avatar" href="/profile" aria-label="Your profile">
               {initials(account.profile.full_name || "")}
             </Link>
@@ -288,21 +325,29 @@ export default function SiteShell({ children }: { children: React.ReactNode }) {
         </header>
         <main id="main" className="page" tabIndex={-1}>
           <Feedback error={error} message={message} />
+          {account.profile.is_suspended && (
+            <p className="note amber">
+              Trading is suspended on this account. You can still access
+              existing orders, settlement and disputes.
+            </p>
+          )}
           {children}
         </main>
       </div>
-      {listing && (
-        <ListingForm
-          userId={account.userId}
-          campus={account.profile.campus}
-          onSaved={() =>
-            setMessage(
-              "Listing published. Your item is now available on the marketplace.",
-            )
-          }
-          onClose={() => setListing(false)}
-        />
-      )}
+      {listing &&
+        !account.profile.is_admin &&
+        !account.profile.is_suspended && (
+          <ListingForm
+            userId={account.userId}
+            campus={account.profile.campus}
+            onSaved={() =>
+              setMessage(
+                "Listing published. Your item is now available on the marketplace.",
+              )
+            }
+            onClose={() => setListing(false)}
+          />
+        )}
     </Context.Provider>
   );
 }

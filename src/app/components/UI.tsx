@@ -55,7 +55,8 @@ export function PageHeader({
     </div>
   );
 }
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status: value }: { status: string | null }) {
+  const status = value ?? "Unknown";
   return (
     <span
       className={`badge ${["completed", "available"].includes(status) ? "green" : ["disputed"].includes(status) ? "red" : ["pending", "refunded"].includes(status) ? "amber" : ""}`}

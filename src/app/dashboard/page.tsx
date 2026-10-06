@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   errorMessage,
+  requireTrader,
   loadOrders,
   loadProducts,
   money,
@@ -53,13 +54,15 @@ function DashboardContent() {
       setOrders(activity.filter((o) => o.buyer_id === userId));
       setBalance(wallet.data.balance);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [userId]);
-  useDataRefresh(load);
+  useDataRefresh(load, ["personal", "marketplace"]);
   async function fund(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (lock.current) return;
@@ -72,6 +75,7 @@ function DashboardContent() {
     setBusy(true);
     setActionError("");
     try {
+      await requireTrader();
       const { error: failure } = await supabase.rpc("fund_wallet", {
         p_amount: amount,
       });
@@ -87,7 +91,7 @@ function DashboardContent() {
     }
   }
   const active = orders.filter((o) =>
-    ["escrow_funded", "disputed"].includes(o.status),
+    ["escrow_funded", "disputed"].includes(o.status ?? ""),
   );
   return (
     <>
@@ -100,8 +104,8 @@ function DashboardContent() {
           </Link>
         }
       />
-      <Feedback message={message} />
-      {loading || error ? (
+      <Feedback message={message} error={balance !== null ? error : ""} />
+      {loading || (error && balance === null) ? (
         <LoadState loading={loading} error={error} retry={load} />
       ) : (
         <>
@@ -188,6 +192,7 @@ function DashboardContent() {
               </div>
               <button
                 className="btn lime"
+                disabled={profile.is_suspended}
                 onClick={() => {
                   setActionError("");
                   setTopUp(true);
@@ -204,7 +209,11 @@ function DashboardContent() {
           <section className="panel inventory-empty" id="inventory">
             <div className="panel-head">
               <h2>Your listings</h2>
-              <button className="text-link" onClick={sell}>
+              <button
+                className="text-link"
+                disabled={profile.is_suspended}
+                onClick={sell}
+              >
                 <Icon name="plus" />
                 List an item
               </button>
@@ -225,9 +234,14 @@ function DashboardContent() {
                   </div>
                   <div className="row wrap">
                     <StatusBadge status={p.status} />
+                    <span className="badge neutral">{p.moderation_status}</span>
                     <button
                       className="btn"
-                      disabled={p.status !== "available"}
+                      disabled={
+                        profile.is_suspended ||
+                        p.status !== "available" ||
+                        p.moderation_status !== "visible"
+                      }
                       onClick={() => setEditing(p)}
                     >
                       Edit
@@ -242,7 +256,11 @@ function DashboardContent() {
                   That spare textbook or unused lamp could be someone’s next
                   great find.
                 </p>
-                <button className="btn primary" onClick={sell}>
+                <button
+                  className="btn primary"
+                  disabled={profile.is_suspended}
+                  onClick={sell}
+                >
                   <Icon name="plus" />
                   Create your first listing
                 </button>
@@ -292,7 +310,7 @@ function DashboardContent() {
         <ListingForm
           userId={userId}
           campus={profile.campus}
-          product={editing}
+          product={products.find((p) => p.id === editing.id) ?? editing}
           onSaved={() => setMessage("Listing updated successfully.")}
           onClose={() => setEditing(null)}
         />

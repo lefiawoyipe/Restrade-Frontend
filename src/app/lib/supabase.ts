@@ -1,3 +1,4 @@
+import type { Database } from "@/lib/database.types";
 import { createBrowserClient } from "@supabase/ssr";
 
 function normalizeSupabaseUrl(url: string) {
@@ -11,7 +12,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Missing Supabase environment variables");
 }
 
-export const supabase = createBrowserClient(
+export const supabase = createBrowserClient<Database>(
   normalizeSupabaseUrl(supabaseUrl),
   supabaseAnonKey,
 );

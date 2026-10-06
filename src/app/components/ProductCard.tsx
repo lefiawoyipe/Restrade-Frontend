@@ -14,7 +14,7 @@ export default function ProductCard({
   onSave?: () => void;
 }) {
   return (
-    <article className="product">
+    <article data-product-id={p.id} className="product">
       <div className="product-photo">
         <Link href={`/marketplace/${p.id}`} aria-label={`View ${p.title}`}>
           <ProductImage src={p.image_url} title={p.title} />
@@ -51,7 +51,7 @@ export default function ProductCard({
             {p.location || p.campus || "Location not provided"}
           </span>
           <span className="rating">
-            {p.seller && p.seller.total_reviews > 0
+            {p.seller && (p.seller.total_reviews ?? 0) > 0
               ? `★ ${Number(p.seller.trust_score).toFixed(1)}`
               : "No reviews yet"}{" "}
             · {p.seller?.full_name || "Seller"}

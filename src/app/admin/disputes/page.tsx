@@ -1,10 +1,10 @@
 "use client";
 import SiteShell from "@/app/components/SiteShell";
-import AdminConsole from "@/app/components/AdminConsole";
+import AdminDisputes from "@/app/components/AdminDisputes";
 export default function Page() {
   return (
     <SiteShell>
-      <AdminConsole section="overview" />
+      <AdminDisputes />
     </SiteShell>
   );
 }

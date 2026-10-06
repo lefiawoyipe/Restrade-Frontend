@@ -55,7 +55,19 @@ export default function AuthForm({ register = false }: { register?: boolean }) {
           )
             ? requested
             : "/dashboard";
-        router.replace(target);
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("is_admin,is_suspended")
+          .eq("id", result.data.user.id)
+          .single();
+        if (profileError) throw profileError;
+        router.replace(
+          profile.is_admin
+            ? profile.is_suspended
+              ? "/settings"
+              : "/admin"
+            : target,
+        );
         router.refresh();
       }
     } catch (cause) {

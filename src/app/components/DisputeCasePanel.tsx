@@ -135,13 +135,15 @@ export default function DisputeCasePanel({
         ),
       );
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [order.id]);
-  useDataRefresh(load, false);
+  useDataRefresh(load, ["personal", "admin"]);
   async function act(action: () => Promise<void>) {
     if (lock.current) return;
     lock.current = true;
@@ -150,7 +152,7 @@ export default function DisputeCasePanel({
     setSuccess("");
     try {
       await action();
-      await load();
+      notifyDataChanged(["personal", "admin", "marketplace"]);
     } catch (cause) {
       setActionError(errorMessage(cause));
     } finally {
@@ -195,7 +197,7 @@ export default function DisputeCasePanel({
       busy={busy}
       onClose={onClose}
     >
-      {loading || error ? (
+      {loading || (error && !dispute) ? (
         <LoadState loading={loading} error={error} retry={load} />
       ) : (
         <div className="stack">
@@ -342,13 +344,18 @@ export default function DisputeCasePanel({
             </div>
           )}
           {profile.is_admin &&
+            !profile.is_suspended &&
+            order.buyer_id !== userId &&
+            order.product?.seller_id !== userId &&
             order.status === "disputed" &&
             !dispute?.resolved_at && (
               <form
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (!note.trim()) {
-                    setActionError("Record a reason for the decision.");
+                  if (note.trim().length < 3 || note.trim().length > 5000) {
+                    setActionError(
+                      "Record a decision reason of 3?5000 characters.",
+                    );
                     return;
                   }
                   setConfirm(true);
@@ -416,7 +423,6 @@ export default function DisputeCasePanel({
                               },
                             );
                             if (result.error) throw result.error;
-                            notifyDataChanged();
                             setSuccess(
                               "Resolution recorded. Funds transferred.",
                             );

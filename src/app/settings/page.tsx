@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { dateLabel, errorMessage, statusLabels } from "@/lib/marketplace";
 import SiteShell, { useWorkspace } from "../components/SiteShell";
 import { Feedback, LoadState, PageHeader } from "../components/UI";
+import RecommendationSettings from "../components/RecommendationSettings";
 import Link from "next/link";
 
 function SettingsContent() {
@@ -25,6 +26,7 @@ function SettingsContent() {
       }[]
     >([]);
   const lock = useRef(false);
+  const dirty = useRef(false);
   const load = useCallback(async () => {
     try {
       const [prefs, updates] = await Promise.all([
@@ -42,17 +44,21 @@ function SettingsContent() {
       ]);
       if (prefs.error) throw prefs.error;
       if (updates.error) throw updates.error;
-      setOrderAlerts(prefs.data?.order_alerts ?? true);
-      setMarketAlerts(prefs.data?.marketplace_updates ?? false);
+      if (!dirty.current) {
+        setOrderAlerts(prefs.data?.order_alerts ?? true);
+        setMarketAlerts(prefs.data?.marketplace_updates ?? false);
+      }
       setNotifications(updates.data);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [userId]);
-  useDataRefresh(load, false);
+  useDataRefresh(load, ["personal"]);
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (lock.current) return;
@@ -72,6 +78,7 @@ function SettingsContent() {
         .select("user_id")
         .single();
       if (result.error) throw result.error;
+      dirty.current = false;
       setMessage("Preferences saved.");
     } catch (cause) {
       setActionError(errorMessage(cause));
@@ -86,7 +93,14 @@ function SettingsContent() {
         title="Settings"
         description="Choose which updates you want to receive."
       />
-      {loading || error ? (
+      <RecommendationSettings />
+      <Feedback error={error} />
+      {error && (
+        <button className="btn" onClick={load}>
+          Retry settings read
+        </button>
+      )}
+      {loading ? (
         <LoadState loading={loading} error={error} retry={load} />
       ) : (
         <>
@@ -104,6 +118,7 @@ function SettingsContent() {
                 checked={orderAlerts}
                 disabled={busy}
                 onChange={(e) => {
+                  dirty.current = true;
                   setOrderAlerts(e.target.checked);
                   setMessage("");
                 }}
@@ -121,6 +136,7 @@ function SettingsContent() {
                 checked={marketAlerts}
                 disabled={busy}
                 onChange={(e) => {
+                  dirty.current = true;
                   setMarketAlerts(e.target.checked);
                   setMessage("");
                 }}

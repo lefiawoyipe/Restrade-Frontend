@@ -16,6 +16,6 @@ export default defineConfig({
   webServer: {
     command: "node tests/fixture-server.mjs",
     url: "http://127.0.0.1:3107/login",
-    reuseExistingServer: false,
+    reuseExistingServer: process.env.PLAYWRIGHT_REUSE_SERVER === "1",
   },
 });

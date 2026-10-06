@@ -11,6 +11,11 @@ for (const route of [
   "/profile",
   "/settings",
   "/admin",
+  "/admin/inventory",
+  "/admin/users",
+  "/admin/orders",
+  "/admin/disputes",
+  "/admin/audit",
 ]) {
   const response = await fetch(base + route, { redirect: "manual" });
   assert.equal(response.status, 307, route);
@@ -21,6 +26,14 @@ for (const route of [
   );
   console.log(`PASS: ${route} redirects anonymous visitors to login`);
 }
+const unsubscribe = await fetch(base + "/unsubscribe?token=" + "a".repeat(64), {
+  redirect: "manual",
+});
+assert.equal(unsubscribe.status, 200);
+assert.equal(unsubscribe.headers.get("referrer-policy"), "no-referrer");
+assert.match(unsubscribe.headers.get("cache-control"), /no-store/);
+assert.match(unsubscribe.headers.get("x-robots-tag"), /noindex/);
+console.log("PASS: public unsubscribe returns privacy headers without login");
 fs.mkdirSync("artifacts/screenshots", { recursive: true });
 const browser = await chromium.launch({
   channel: process.env.PLAYWRIGHT_CHANNEL || "msedge",

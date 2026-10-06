@@ -4,7 +4,7 @@ import AdminConsole from "@/app/components/AdminConsole";
 export default function Page() {
   return (
     <SiteShell>
-      <AdminConsole section="overview" />
+      <AdminConsole section="inventory" />
     </SiteShell>
   );
 }

@@ -9,16 +9,51 @@ const client = createClient(
 const products = await client
   .from("products")
   .select(
-    "id,category,condition,campus,location,seller:profiles!products_seller_id_fkey(id,full_name,trust_score,total_reviews,campus)",
+    "id,category,condition,campus,location,moderation_status,seller:profiles!products_seller_id_fkey!inner(id,full_name,trust_score,total_reviews,campus,is_admin,is_suspended)",
   )
   .eq("status", "available")
+  .eq("moderation_status", "visible")
+  .not("seller.is_admin", "is", true)
+  .eq("seller.is_suspended", false)
   .limit(1);
 assert.equal(products.error, null, products.error?.message);
 console.log(
   "PASS: public product fields and seller relationship are queryable",
 );
+const categories = await client.from("product_categories").select("name");
+assert.equal(categories.error, null, categories.error?.message);
+assert.deepEqual(categories.data.map((row) => row.name).sort(), [
+  "Books",
+  "Electronics",
+  "Fashion",
+  "Room essentials",
+]);
+console.log("PASS: canonical category contract is available");
+const versions = await client.from("data_versions").select("topic,version");
+assert.ok(
+  versions.error || versions.data.length === 0,
+  "Anonymous versions must not be readable",
+);
+console.log("PASS: version counters do not expose data to anonymous callers");
 const invalidId = "00000000-0000-4000-8000-000000000000";
 for (const [rpc, parameters] of [
+  [
+    "admin_moderate_product",
+    {
+      p_product_id: invalidId,
+      p_hidden: true,
+      p_reason: "Anonymous denial check",
+    },
+  ],
+  [
+    "admin_suspend_trading",
+    {
+      p_user_id: invalidId,
+      p_suspended: true,
+      p_reason: "Anonymous denial check",
+    },
+  ],
+  ["set_recommendation_email", { p_enabled: false }],
   ["initiate_purchase", { p_product_id: invalidId }],
   ["release_escrow", { p_order_id: invalidId }],
   [

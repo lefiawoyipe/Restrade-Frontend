@@ -1,13 +1,15 @@
 "use client";
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  categories,
+  loadCategories,
+  requireTrader,
   conditions,
   errorMessage,
   notifyDataChanged,
   type Product,
 } from "@/lib/marketplace";
+import { useDataRefresh } from "@/lib/use-data-refresh";
 import { Feedback, Modal } from "./UI";
 
 export default function ListingForm({
@@ -27,6 +29,15 @@ export default function ListingForm({
     [error, setError] = useState(""),
     [progress, setProgress] = useState("");
   const lock = useRef(false);
+  const [categories, setCategories] = useState<string[]>([]);
+  const load = useCallback(async () => {
+    try {
+      setCategories(await loadCategories());
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  }, []);
+  useDataRefresh(load, []);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (lock.current) return;
@@ -60,6 +71,15 @@ export default function ListingForm({
     setError("");
     let uploaded: string | undefined;
     try {
+      await requireTrader();
+      if (product && product.moderation_status !== "visible")
+        throw new Error("Hidden listings cannot be edited until restored.");
+      const category = String(form.get("category") ?? "").trim();
+      if (
+        (!product || category || product.category) &&
+        !categories.includes(category)
+      )
+        throw new Error("Choose a valid product category.");
       let image_url = product?.image_url || null;
       if (photo?.size) {
         setProgress("Uploading your photo…");
@@ -78,7 +98,7 @@ export default function ListingForm({
         description,
         price,
         image_url,
-        category: String(form.get("category")).trim() || null,
+        ...(category ? { category } : {}),
         condition: String(form.get("condition")) || null,
         campus: String(form.get("campus")).trim() || null,
         location: String(form.get("location")).trim() || null,
@@ -119,7 +139,11 @@ export default function ListingForm({
       busy={busy}
     >
       <form onSubmit={submit}>
-        <fieldset disabled={busy}>
+        <fieldset
+          disabled={
+            busy || (product && product.moderation_status !== "visible")
+          }
+        >
           <div className="form-grid">
             <label className="field full">
               Item title
@@ -146,8 +170,9 @@ export default function ListingForm({
               Category
               <select
                 name="category"
+                aria-label="Category"
                 defaultValue={product?.category || ""}
-                required
+                required={!product || product.category !== null}
               >
                 <option value="">Choose a category</option>
                 {[
@@ -159,6 +184,12 @@ export default function ListingForm({
                   <option key={c}>{c}</option>
                 ))}
               </select>
+              {product && !product.category && (
+                <small>
+                  Select a category to help buyers find this item. You may keep
+                  this legacy listing uncategorized.
+                </small>
+              )}
             </label>
             <label className="field full">
               Condition
@@ -199,7 +230,7 @@ export default function ListingForm({
                 name="description"
                 required
                 rows={4}
-                defaultValue={product?.description}
+                defaultValue={product?.description ?? ""}
                 maxLength={5000}
               />
             </label>
@@ -216,6 +247,12 @@ export default function ListingForm({
           </div>
         </fieldset>
         <Feedback error={error} />
+        {product?.moderation_status === "hidden" && (
+          <p className="note">
+            This listing is hidden. Editing is available after an administrator
+            restores it.
+          </p>
+        )}
         {progress && (
           <p role="status" className="muted small">
             {progress}
@@ -230,7 +267,12 @@ export default function ListingForm({
           >
             Cancel
           </button>
-          <button className="btn primary" disabled={busy}>
+          <button
+            className="btn primary"
+            disabled={
+              busy || (product && product.moderation_status !== "visible")
+            }
+          >
             {busy ? "Saving…" : product ? "Save changes" : "Publish listing"}
           </button>
         </div>

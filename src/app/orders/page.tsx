@@ -56,7 +56,11 @@ function OrderAction({
           p_reason: String(values.get("reason")),
           p_description: description,
         });
-      } else
+      } else {
+        if (!order.product?.seller_id)
+          throw new Error(
+            "Seller information is unavailable. Refresh before reviewing.",
+          );
         result = await supabase.from("reviews").insert({
           order_id: order.id,
           reviewer_id: userId,
@@ -64,6 +68,7 @@ function OrderAction({
           rating: Number(values.get("rating")),
           comment: String(values.get("comment")).trim(),
         });
+      }
       if (result.error) throw result.error;
       notifyDataChanged();
       onSuccess();
@@ -203,20 +208,23 @@ function OrdersContent() {
       setOrders(activity);
       setReviewed(ids);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [userId]);
-  useDataRefresh(load);
+  useDataRefresh(load, ["personal", "marketplace"]);
   const visible = orders.filter(
     (o) =>
       (view === "purchases"
         ? o.buyer_id === userId
         : o.product?.seller_id === userId) &&
       (tab === "All orders" ||
-        (tab === "Active" && ["pending", "escrow_funded"].includes(o.status)) ||
+        (tab === "Active" &&
+          ["pending", "escrow_funded"].includes(o.status ?? "")) ||
         (tab === "Completed" && o.status === "completed") ||
         (tab === "Disputed" && o.status === "disputed") ||
         (tab === "Refunded" && o.status === "refunded")),
@@ -255,8 +263,8 @@ function OrdersContent() {
           ),
         )}
       </div>
-      <Feedback message={message} />
-      {loading || error ? (
+      <Feedback message={message} error={orders.length > 0 ? error : ""} />
+      {loading || (error && orders.length === 0) ? (
         <LoadState loading={loading} error={error} retry={load} />
       ) : visible.length ? (
         visible.map((o) => (
@@ -273,6 +281,12 @@ function OrdersContent() {
                     {o.id.slice(0, 8).toUpperCase()} · {dateLabel(o.created_at)}
                   </small>
                   <h3>{o.product?.title || "Item unavailable"}</h3>
+                  {o.product && (
+                    <p className="small muted">
+                      Listing: {o.product.status ?? "unavailable"} ?{" "}
+                      {o.product.moderation_status}
+                    </p>
+                  )}
                   <span className="small muted">
                     {view === "purchases"
                       ? `Seller: ${o.product?.seller?.full_name || "Unavailable"}`
@@ -341,7 +355,7 @@ function OrdersContent() {
                       : "Leave a review"}
                   </button>
                 )}
-                {["disputed", "refunded"].includes(o.status) && (
+                {["disputed", "refunded"].includes(o.status ?? "") && (
                   <button className="btn" onClick={() => setCaseOrder(o)}>
                     View case
                   </button>
@@ -361,7 +375,7 @@ function OrdersContent() {
       )}
       {action && (
         <OrderAction
-          order={action.order}
+          order={orders.find((o) => o.id === action.order.id) ?? action.order}
           kind={action.kind}
           onSuccess={() =>
             setMessage(
@@ -379,7 +393,7 @@ function OrdersContent() {
       )}
       {caseOrder && (
         <DisputeCasePanel
-          order={caseOrder}
+          order={orders.find((o) => o.id === caseOrder.id) ?? caseOrder}
           onClose={() => setCaseOrder(null)}
         />
       )}

@@ -23,8 +23,16 @@ export default function Home() {
       } = await supabase.auth.getSession();
       let query = supabase
         .from("products")
-        .select(productSelect)
+        .select(
+          productSelect.replace(
+            "!products_seller_id_fkey",
+            "!products_seller_id_fkey!inner",
+          ),
+        )
         .eq("status", "available")
+        .eq("moderation_status", "visible")
+        .not("seller.is_admin", "is", true)
+        .eq("seller.is_suspended", false)
         .order("created_at", { ascending: false })
         .limit(3);
       if (session) query = query.neq("seller_id", session.user.id);
@@ -32,13 +40,15 @@ export default function Home() {
       if (result.error) throw result.error;
       setProducts(result.data as unknown as Product[]);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, []);
-  useDataRefresh(load, false);
+  useDataRefresh(load, ["marketplace"]);
   return (
     <>
       <PublicHeader />

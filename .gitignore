@@ -40,8 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-AGENTS.md
-CLAUDE.md
+
 .env.local
 # Local browser-test output
 /test-results/
@@ -50,3 +49,5 @@ CLAUDE.md
 
 #reference alignment
 /reference-alignment.md/
+
+ENGAGEMENT-FRONTEND-HANDOFF.md

@@ -67,12 +67,12 @@ function ProfileContent() {
             {profile.campus || "Campus not provided"}
           </p>
           <div className="rating-big">
-            {profile.total_reviews > 0
+            {(profile.total_reviews ?? 0) > 0
               ? `★ ${Number(profile.trust_score).toFixed(1)}`
               : "—"}
           </div>
           <strong>
-            {profile.total_reviews > 0
+            {(profile.total_reviews ?? 0) > 0
               ? `${profile.total_reviews} reviews`
               : "No reviews yet"}
           </strong>

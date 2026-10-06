@@ -186,7 +186,7 @@ test("admin must review a reason and confirm before resolving a case", async ({
   page,
 }) => {
   const requests = await mockBackend(page, { admin: true });
-  await page.goto("/admin");
+  await page.goto("/admin/disputes");
   await expect(page.getByRole("button", { name: "Review case" })).toBeVisible();
   await page.screenshot({
     path: path.join(screenshots, "admin-desktop-fixture.png"),

@@ -1,10 +1,13 @@
 "use client";
 import { useDataRefresh } from "@/lib/use-data-refresh";
+import Link from "next/link";
 import { Suspense, useCallback, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
-  categories,
+  loadCategories,
+  requireTrader,
+  notifyDataChanged,
   errorMessage,
   loadProducts,
   type Product,
@@ -14,7 +17,7 @@ import ProductCard from "../components/ProductCard";
 import { Feedback, Icon, LoadState, PageHeader } from "../components/UI";
 
 function MarketplaceContent() {
-  const { userId, sell } = useWorkspace(),
+  const { userId, sell, profile } = useWorkspace(),
     params = useSearchParams(),
     search = params.get("q") || "";
   const [products, setProducts] = useState<Product[]>([]),
@@ -25,11 +28,16 @@ function MarketplaceContent() {
     [error, setError] = useState(""),
     [actionError, setActionError] = useState(""),
     [saving, setSaving] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const savingIds = useRef(new Set<string>());
   const load = useCallback(async () => {
     try {
-      const items = await loadProducts(userId),
-        savedIds: string[] = [];
+      const [items, canonical] = await Promise.all([
+        loadProducts(userId),
+        loadCategories(),
+      ]);
+      setCategories(canonical);
+      const savedIds: string[] = [];
       for (let from = 0; ; from += 500) {
         const result = await supabase
           .from("saved_items")
@@ -44,13 +52,15 @@ function MarketplaceContent() {
       setProducts(items);
       setSaved(savedIds);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [userId]);
-  useDataRefresh(load);
+  useDataRefresh(load, ["marketplace", "personal"]);
   async function toggle(id: string) {
     if (savingIds.current.has(id)) return;
     savingIds.current.add(id);
@@ -58,6 +68,7 @@ function MarketplaceContent() {
     setActionError("");
     try {
       const wasSaved = saved.includes(id);
+      if (!wasSaved) await requireTrader();
       const result = wasSaved
         ? await supabase
             .from("saved_items")
@@ -68,6 +79,7 @@ function MarketplaceContent() {
             .from("saved_items")
             .insert({ user_id: userId, product_id: id });
       if (result.error) throw result.error;
+      notifyDataChanged(["personal"]);
       setSaved((current) =>
         wasSaved ? current.filter((item) => item !== id) : [...current, id],
       );
@@ -133,12 +145,20 @@ function MarketplaceContent() {
           <span className="banner-stamp">
             Pass it<strong>ON.</strong>Keep it going
           </span>
-          <button className="btn lime" onClick={sell}>
+          <button
+            className="btn lime"
+            disabled={profile.is_suspended}
+            onClick={sell}
+          >
             List your first item <Icon name="arrow" />
           </button>
         </div>
       </section>
-      <button className="btn primary mobile-sell" onClick={sell}>
+      <button
+        className="btn primary mobile-sell"
+        disabled={profile.is_suspended}
+        onClick={sell}
+      >
         <Icon name="plus" />
         Sell an item
       </button>
@@ -159,8 +179,16 @@ function MarketplaceContent() {
           </button>
         ))}
       </nav>
-      <Feedback error={actionError} />
-      {loading || error ? (
+      {category === "Saved items" && (
+        <p className="small">
+          <Link className="text-link" href="/settings#recommendations">
+            Manage saved-category email preferences
+          </Link>
+          . Saving does not subscribe you to email.
+        </p>
+      )}
+      <Feedback error={actionError || (products.length > 0 ? error : "")} />
+      {loading || (error && products.length === 0) ? (
         <LoadState loading={loading} error={error} retry={load} />
       ) : (
         <>
@@ -193,7 +221,10 @@ function MarketplaceContent() {
                   key={p.id}
                   product={p}
                   saved={saved.includes(p.id)}
-                  saving={saving.includes(p.id)}
+                  saving={
+                    saving.includes(p.id) ||
+                    (profile.is_suspended && !saved.includes(p.id))
+                  }
                   onSave={() => toggle(p.id)}
                 />
               ))

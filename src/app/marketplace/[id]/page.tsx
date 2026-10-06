@@ -8,6 +8,7 @@ import {
   conditions,
   dateLabel,
   errorMessage,
+  requireTrader,
   initials,
   money,
   notifyDataChanged,
@@ -26,7 +27,7 @@ import {
 
 function Details() {
   const { id } = useParams<{ id: string }>(),
-    { userId } = useWorkspace();
+    { userId, profile } = useWorkspace();
   const [product, setProduct] = useState<Product | null>(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
@@ -45,19 +46,28 @@ function Details() {
       if (result.error) throw result.error;
       setProduct(result.data as unknown as Product | null);
       setError("");
+      return true;
     } catch (cause) {
       setError(errorMessage(cause));
+      return false;
     } finally {
       setLoading(false);
     }
   }, [id]);
-  useDataRefresh(load, false);
+  useDataRefresh(load, ["marketplace"]);
   async function purchase() {
     if (!product || lock.current) return;
     lock.current = true;
     setBusy(true);
     setActionError("");
     try {
+      await requireTrader();
+      if (
+        product.moderation_status !== "visible" ||
+        product.seller?.is_admin ||
+        product.seller?.is_suspended
+      )
+        throw new Error("This listing is unavailable for purchase.");
       const result = await supabase.rpc("initiate_purchase", {
         p_product_id: product.id,
       });
@@ -65,7 +75,6 @@ function Details() {
       setPurchased(true);
       setConfirm(false);
       notifyDataChanged();
-      await load();
     } catch (cause) {
       setActionError(errorMessage(cause));
     } finally {
@@ -73,7 +82,7 @@ function Details() {
       setBusy(false);
     }
   }
-  if (loading || error)
+  if (loading || (error && !product))
     return <LoadState loading={loading} error={error} retry={load} />;
   if (!product)
     return (
@@ -86,12 +95,19 @@ function Details() {
       </div>
     );
   const own = product.seller_id === userId;
+  const available =
+    product.status === "available" &&
+    product.moderation_status === "visible" &&
+    product.seller &&
+    !product.seller.is_admin &&
+    !product.seller.is_suspended;
   return (
     <>
       <Link href="/marketplace" className="back">
         <Icon name="back" />
         Back to marketplace
       </Link>
+      <Feedback error={error} />
       <section className="product-detail">
         <div>
           <ProductImage
@@ -112,6 +128,9 @@ function Details() {
               {product.category || "Uncategorized"}
             </span>
             <StatusBadge status={product.status} />
+            {product.moderation_status === "hidden" && (
+              <span className="badge red">Hidden by moderation</span>
+            )}
           </div>
           <h1>{product.title}</h1>
           <p className="small muted">Listed {dateLabel(product.created_at)}</p>
@@ -135,7 +154,7 @@ function Details() {
               <div>
                 <strong>{product.seller?.full_name || "Seller"}</strong>
                 <p className="small muted">
-                  {product.seller && product.seller.total_reviews > 0
+                  {product.seller && (product.seller.total_reviews ?? 0) > 0
                     ? `★ ${Number(product.seller.trust_score).toFixed(1)} · ${product.seller.total_reviews} reviews`
                     : "No reviews yet"}
                 </p>
@@ -161,7 +180,16 @@ function Details() {
           ) : (
             <button
               className="btn primary"
-              disabled={own || product.status !== "available"}
+              disabled={
+                own ||
+                profile.is_suspended ||
+                profile.is_admin ||
+                product.status !== "available" ||
+                product.moderation_status !== "visible" ||
+                !product.seller ||
+                product.seller.is_admin ||
+                product.seller.is_suspended
+              }
               onClick={() => {
                 setActionError("");
                 setConfirm(true);
@@ -169,9 +197,11 @@ function Details() {
             >
               {own
                 ? "This is your listing"
-                : product.status !== "available"
-                  ? "No longer available"
-                  : "Buy with test escrow"}
+                : profile.is_suspended
+                  ? "Trading suspended"
+                  : !available
+                    ? "No longer available"
+                    : "Buy with test escrow"}
               <Icon name="arrow" />
             </button>
           )}
