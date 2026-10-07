@@ -51,7 +51,11 @@ Install the dependencies:
 
 ```bash
 npm install
+```
 
-## DEPLOYMENT
-#Vercel
-(https://restrade.vercel.app)
+
+## Deployment
+
+This application is deployed on [Vercel](https://vercel.com/).
+
+Visit the live application at [restrade.vercel.app](https://restrade.vercel.app).
