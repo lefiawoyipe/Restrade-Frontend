@@ -18,6 +18,8 @@ import { useWorkspace } from "./SiteShell";
 import { Feedback, LoadState, Modal, PageHeader, StatusBadge } from "./UI";
 import DisputeCasePanel from "./DisputeCasePanel";
 
+import { snapshot } from "@/lib/pickup";
+import Link from "next/link";
 type Section = "overview" | "inventory" | "users" | "orders" | "audit";
 type Action = {
   kind: "product" | "user";
@@ -59,17 +61,18 @@ export default function AdminConsole({ section }: { section: Section }) {
             .from("profiles")
             .select("id", { count: "exact", head: true }),
           supabase.from("orders").select("id", { count: "exact", head: true }),
-          supabase
-            .from("disputes")
-            .select("order_id", { count: "exact", head: true })
-            .is("resolved_at", null),
+          supabase.rpc("admin_case_queue", {
+            p_limit: 100,
+            p_offset: 0,
+            p_resolved: false,
+          }),
         ]);
         for (const result of results) if (result.error) throw result.error;
         setCounts({
           products: results[0].count ?? 0,
           users: results[1].count ?? 0,
           orders: results[2].count ?? 0,
-          disputes: results[3].count ?? 0,
+          disputes: Array.isArray(results[3].data) ? results[3].data.length : 0,
         });
       } else if (section === "inventory") {
         const result = await supabase
@@ -144,8 +147,13 @@ export default function AdminConsole({ section }: { section: Section }) {
             <div className="stats">
               {Object.entries(counts).map(([name, count]) => (
                 <div className="stat" key={name}>
-                  <div>{name === "disputes" ? "Open disputes" : name}</div>
-                  <strong>{count}</strong>
+                  <div>
+                    {name === "disputes" ? "Cases awaiting admin review" : name}
+                  </div>
+                  <strong>
+                    {count}
+                    {name === "disputes" && count === 100 ? "+" : ""}
+                  </strong>
                 </div>
               ))}
             </div>
@@ -232,11 +240,11 @@ export default function AdminConsole({ section }: { section: Section }) {
                 orders.map((o) => (
                   <div className="order-row" key={o.id}>
                     <div>
-                      <strong>{o.product?.title ?? "Item unavailable"}</strong>
+                      <strong>{snapshot(o).title}</strong>
                       <p>{o.id}</p>
                       <p>
                         Buyer: {o.buyer?.full_name ?? "Unavailable"} · Seller:{" "}
-                        {o.product?.seller?.full_name ?? "Unavailable"}
+                        {snapshot(o).seller}
                       </p>
                       <p>
                         {money(o.amount)} ·{" "}
@@ -245,6 +253,11 @@ export default function AdminConsole({ section }: { section: Section }) {
                           : "Not currently held in escrow"}
                       </p>
                       <StatusBadge status={o.status} />
+                      <p>
+                        <Link className="text-link" href="/admin/disputes">
+                          Case queue and history
+                        </Link>
+                      </p>
                       {o.product && (
                         <p>
                           Listing: {o.product.status} ·{" "}
@@ -252,9 +265,11 @@ export default function AdminConsole({ section }: { section: Section }) {
                         </p>
                       )}
                     </div>
-                    {["disputed", "refunded"].includes(o.status ?? "") && (
+                    {["disputed", "refunded", "completed"].includes(
+                      o.status ?? "",
+                    ) && (
                       <button className="btn" onClick={() => setSelected(o)}>
-                        View case
+                        Open audited case
                       </button>
                     )}
                   </div>

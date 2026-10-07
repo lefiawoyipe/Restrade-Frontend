@@ -1,4 +1,5 @@
 "use client";
+import { record } from "@/lib/pickup";
 import { useDataRefresh } from "@/lib/use-data-refresh";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -36,6 +37,18 @@ function Details() {
     [busy, setBusy] = useState(false),
     [purchased, setPurchased] = useState(false);
   const lock = useRef(false);
+  const [createdOrder, setCreatedOrder] = useState("");
+  const [pickupEnabled, setPickupEnabled] = useState<boolean | null>(null);
+  const configLoad = useCallback(async () => {
+    const result = await supabase.rpc("get_pickup_workflow_config");
+    if (result.error) return false;
+    const config = record(result.data);
+    setPickupEnabled(
+      typeof config.enabled === "boolean" ? config.enabled : null,
+    );
+    return true;
+  }, []);
+  useDataRefresh(configLoad, []);
   const load = useCallback(async () => {
     try {
       const result = await supabase
@@ -75,6 +88,19 @@ function Details() {
       setPurchased(true);
       setConfirm(false);
       notifyDataChanged();
+      const created = await supabase
+        .from("orders")
+        .select("id")
+        .eq("product_id", product.id)
+        .eq("buyer_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (created.data) setCreatedOrder(created.data.id);
+      if (created.error)
+        setActionError(
+          "Purchase succeeded. Open Orders to find your order details.",
+        );
     } catch (cause) {
       setActionError(errorMessage(cause));
     } finally {
@@ -173,7 +199,10 @@ function Details() {
           {purchased ? (
             <div className="feedback success" role="status">
               Purchase confirmed. Your funds are held in escrow.{" "}
-              <Link className="text-link" href="/orders">
+              <Link
+                className="text-link"
+                href={createdOrder ? `/orders/${createdOrder}` : "/orders"}
+              >
                 View your order <Icon name="arrow" />
               </Link>
             </div>
@@ -205,6 +234,13 @@ function Details() {
               <Icon name="arrow" />
             </button>
           )}
+          <p className="small muted">
+            {pickupEnabled === true
+              ? "New purchases use local pickup confirmation followed by an inspection period. Your order records the exact server deadlines."
+              : pickupEnabled === false
+                ? "New purchases currently use the legacy pickup flow without automatic deadlines."
+                : "Your order will show its applicable pickup workflow and server deadlines."}
+          </p>
           <p className="small muted detail-disclaimer">
             Uses your test wallet. No real payment.
           </p>

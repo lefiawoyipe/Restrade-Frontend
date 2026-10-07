@@ -45,6 +45,18 @@ export const order = {
   id: "44444444-4444-4444-8444-444444444444",
   buyer_id: uid,
   product_id: products[0].id,
+  seller_id: sellerId,
+  workflow_version: 1,
+  fulfillment_status: "legacy",
+  item_snapshot: {
+    ...products[0],
+    seller_name: "Sam Seller",
+    source: "purchase",
+  },
+  pickup_due_at: null as string | null,
+  handed_over_at: null as string | null,
+  inspection_due_at: null as string | null,
+  settled_at: null as string | null,
   amount: 2800,
   status: "escrow_funded",
   created_at: "2026-09-25T12:00:00Z",
@@ -54,6 +66,9 @@ export const order = {
 export async function mockBackend(
   page: Page,
   options: {
+    pickup?: boolean;
+    disputed?: boolean;
+    seller?: boolean;
     admin?: boolean;
     suspended?: boolean;
     failRecommendation?: boolean;
@@ -77,14 +92,30 @@ export async function mockBackend(
   let emailEnabled = false;
   const currentOrder = {
     ...order,
-    buyer_id: options.admin ? sellerId : uid,
-    status: options.admin ? "disputed" : order.status,
+    buyer_id: options.admin || options.seller ? sellerId : uid,
+    seller_id: options.seller ? uid : sellerId,
+    workflow_version: options.pickup ? 2 : 1,
+    fulfillment_status: options.pickup ? "awaiting_pickup" : "legacy",
+    pickup_due_at: options.pickup
+      ? new Date(Date.now() + 3600000).toISOString()
+      : null,
+    status: options.admin || options.disputed ? "disputed" : order.status,
   };
   const user = {
     id: uid,
     aud: "authenticated",
     role: "authenticated",
     email: "test@example.invalid",
+    factors: options.admin
+      ? [
+          {
+            id: "factor-1",
+            factor_type: "totp",
+            status: "verified",
+            friendly_name: "Test authenticator",
+          },
+        ]
+      : [],
     app_metadata: {},
     user_metadata: {},
     created_at: "2026-01-01T00:00:00Z",
@@ -113,7 +144,12 @@ export async function mockBackend(
       url = new URL(req.url()),
       method = req.method(),
       name = url.pathname.split("/").at(-1)!;
-    const body = req.postDataJSON();
+    let body;
+    try {
+      body = req.postDataJSON();
+    } catch {
+      body = null;
+    }
     requests.push({ path: url.pathname, method, body });
     const json = (value: unknown, status = 200) =>
       route.fulfill({
@@ -204,8 +240,22 @@ export async function mockBackend(
       return options.failWallet
         ? json({ message: "Wallet unavailable" }, 503)
         : json({ balance: 500 });
-    if (name === "orders") return json([currentOrder]);
-    if (name === "reviews") return json([]);
+    if (name === "orders") {
+      if (method === "HEAD")
+        return route.fulfill({
+          status: 200,
+          headers: { "content-range": "0-0/1" },
+        });
+      return json(
+        req.headers().accept?.includes("vnd.pgrst.object")
+          ? currentOrder
+          : [currentOrder],
+      );
+    }
+    if (name === "reviews")
+      return json(
+        req.headers().accept?.includes("vnd.pgrst.object") ? null : [],
+      );
     if (name === "notification_preferences") {
       if (method === "POST") preferences = { ...preferences, ...body };
       return json(preferences);
@@ -221,16 +271,53 @@ export async function mockBackend(
       currentOrder.status = "disputed";
       return json(null);
     }
+    if (name === "get_pickup_workflow_config")
+      return json({ enabled: Boolean(options.pickup) });
+    if (name === "create_pickup_challenge")
+      return json({
+        order_id: order.id,
+        token: "a".repeat(64),
+        expires_at: new Date(Date.now() + 600000).toISOString(),
+      });
+    if (name === "confirm_pickup") {
+      currentOrder.fulfillment_status = "inspection";
+      currentOrder.handed_over_at = new Date().toISOString();
+      currentOrder.inspection_due_at = new Date(
+        Date.now() + 172800000,
+      ).toISOString();
+      return json(null);
+    }
+    const dispute = {
+      order_id: order.id,
+      reason: "Not as described",
+      description: "Test case report",
+      stage: options.admin ? "admin_review" : "negotiation",
+      opened_at: order.created_at,
+      negotiation_due_at: new Date(Date.now() + 3600000).toISOString(),
+      resolved_at: null,
+      resolution_note: null,
+    };
+    if (name === "admin_case_queue")
+      return json([{ ...dispute, title: "Study laptop", amount: 2800 }]);
+    if (name === "admin_open_case")
+      return json({
+        order: currentOrder,
+        dispute,
+        access_expires_at: new Date(Date.now() + 600000).toISOString(),
+        reputation: [],
+      });
+    if (name === "prepare_case_decision")
+      return json("55555555-5555-4555-8555-555555555555");
+    if (name === "challenge")
+      return json({ id: "challenge-1", expires_at: expires });
+    if (name === "verify") return json(session);
+    if (name === "execute_case_decision") {
+      currentOrder.status = "refunded";
+      return json(null);
+    }
+    if (["case_evidence", "settlement_offers"].includes(name)) return json([]);
     if (name === "disputes")
-      return url.searchParams.get("resolved_at")
-        ? json([])
-        : json({
-            order_id: order.id,
-            reason: "Not as described",
-            description: "Test case report",
-            resolved_at: null,
-            resolution_note: null,
-          });
+      return json(currentOrder.status === "disputed" ? dispute : null);
     if (
       name === "dispute_messages" ||
       name === "order_events" ||

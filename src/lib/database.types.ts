@@ -52,6 +52,80 @@ export type Database = {
           },
         ];
       };
+      case_evidence: {
+        Row: {
+          id: string;
+          metadata: Json;
+          object_path: string;
+          order_id: string;
+          registered_at: string;
+          storage_created_at: string;
+          storage_object_id: string;
+          uploader_id: string;
+        };
+        Insert: {
+          id?: string;
+          metadata: Json;
+          object_path: string;
+          order_id: string;
+          registered_at?: string;
+          storage_created_at: string;
+          storage_object_id: string;
+          uploader_id: string;
+        };
+        Update: {
+          id?: string;
+          metadata?: Json;
+          object_path?: string;
+          order_id?: string;
+          registered_at?: string;
+          storage_created_at?: string;
+          storage_object_id?: string;
+          uploader_id?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "case_evidence_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "disputes";
+            referencedColumns: ["order_id"];
+          },
+          {
+            foreignKeyName: "case_evidence_uploader_id_fkey";
+            columns: ["uploader_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      case_evidence_hashes: {
+        Row: {
+          evidence_id: string;
+          sha256: string;
+          verified_at: string;
+        };
+        Insert: {
+          evidence_id: string;
+          sha256: string;
+          verified_at?: string;
+        };
+        Update: {
+          evidence_id?: string;
+          sha256?: string;
+          verified_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "case_evidence_hashes_evidence_id_fkey";
+            columns: ["evidence_id"];
+            isOneToOne: true;
+            referencedRelation: "case_evidence";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       data_versions: {
         Row: {
           topic: string;
@@ -123,7 +197,9 @@ export type Database = {
       disputes: {
         Row: {
           description: string | null;
+          escalated_at: string | null;
           favor_buyer: boolean | null;
+          negotiation_due_at: string | null;
           opened_at: string;
           opened_by: string;
           order_id: string;
@@ -131,10 +207,14 @@ export type Database = {
           resolution_note: string | null;
           resolved_at: string | null;
           resolved_by: string | null;
+          return_due_at: string | null;
+          stage: string;
         };
         Insert: {
           description?: string | null;
+          escalated_at?: string | null;
           favor_buyer?: boolean | null;
+          negotiation_due_at?: string | null;
           opened_at?: string;
           opened_by: string;
           order_id: string;
@@ -142,10 +222,14 @@ export type Database = {
           resolution_note?: string | null;
           resolved_at?: string | null;
           resolved_by?: string | null;
+          return_due_at?: string | null;
+          stage?: string;
         };
         Update: {
           description?: string | null;
+          escalated_at?: string | null;
           favor_buyer?: boolean | null;
+          negotiation_due_at?: string | null;
           opened_at?: string;
           opened_by?: string;
           order_id?: string;
@@ -153,6 +237,8 @@ export type Database = {
           resolution_note?: string | null;
           resolved_at?: string | null;
           resolved_by?: string | null;
+          return_due_at?: string | null;
+          stage?: string;
         };
         Relationships: [
           {
@@ -210,7 +296,9 @@ export type Database = {
       notifications: {
         Row: {
           created_at: string;
+          event_type: string;
           id: string;
+          message: string | null;
           order_id: string;
           read_at: string | null;
           status: Database["public"]["Enums"]["escrow_status"];
@@ -218,7 +306,9 @@ export type Database = {
         };
         Insert: {
           created_at?: string;
+          event_type?: string;
           id?: string;
+          message?: string | null;
           order_id: string;
           read_at?: string | null;
           status: Database["public"]["Enums"]["escrow_status"];
@@ -226,7 +316,9 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          event_type?: string;
           id?: string;
+          message?: string | null;
           order_id?: string;
           read_at?: string | null;
           status?: Database["public"]["Enums"]["escrow_status"];
@@ -253,6 +345,8 @@ export type Database = {
         Row: {
           actor_id: string | null;
           created_at: string;
+          details: Json;
+          event_type: string;
           id: string;
           order_id: string;
           previous_status: Database["public"]["Enums"]["escrow_status"] | null;
@@ -261,6 +355,8 @@ export type Database = {
         Insert: {
           actor_id?: string | null;
           created_at?: string;
+          details?: Json;
+          event_type?: string;
           id?: string;
           order_id: string;
           previous_status?: Database["public"]["Enums"]["escrow_status"] | null;
@@ -269,6 +365,8 @@ export type Database = {
         Update: {
           actor_id?: string | null;
           created_at?: string;
+          details?: Json;
+          event_type?: string;
           id?: string;
           order_id?: string;
           previous_status?: Database["public"]["Enums"]["escrow_status"] | null;
@@ -296,28 +394,52 @@ export type Database = {
           amount: number;
           buyer_id: string;
           created_at: string | null;
+          fulfillment_status: string;
+          handed_over_at: string | null;
           id: string;
+          inspection_due_at: string | null;
+          item_snapshot: Json;
+          pickup_due_at: string | null;
           product_id: string;
+          seller_id: string;
+          settled_at: string | null;
           status: Database["public"]["Enums"]["escrow_status"] | null;
           updated_at: string | null;
+          workflow_version: number;
         };
         Insert: {
           amount: number;
           buyer_id: string;
           created_at?: string | null;
+          fulfillment_status?: string;
+          handed_over_at?: string | null;
           id?: string;
+          inspection_due_at?: string | null;
+          item_snapshot: Json;
+          pickup_due_at?: string | null;
           product_id: string;
+          seller_id: string;
+          settled_at?: string | null;
           status?: Database["public"]["Enums"]["escrow_status"] | null;
           updated_at?: string | null;
+          workflow_version?: number;
         };
         Update: {
           amount?: number;
           buyer_id?: string;
           created_at?: string | null;
+          fulfillment_status?: string;
+          handed_over_at?: string | null;
           id?: string;
+          inspection_due_at?: string | null;
+          item_snapshot?: Json;
+          pickup_due_at?: string | null;
           product_id?: string;
+          seller_id?: string;
+          settled_at?: string | null;
           status?: Database["public"]["Enums"]["escrow_status"] | null;
           updated_at?: string | null;
+          workflow_version?: number;
         };
         Relationships: [
           {
@@ -332,6 +454,13 @@ export type Database = {
             columns: ["product_id"];
             isOneToOne: false;
             referencedRelation: "products";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "orders_seller_id_fkey";
+            columns: ["seller_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
         ];
@@ -564,6 +693,67 @@ export type Database = {
           },
         ];
       };
+      settlement_offers: {
+        Row: {
+          created_at: string;
+          expires_at: string;
+          id: string;
+          order_id: string;
+          outcome: string;
+          proposed_by: string;
+          responded_at: string | null;
+          responded_by: string | null;
+          state: string;
+          terms: string;
+        };
+        Insert: {
+          created_at?: string;
+          expires_at: string;
+          id?: string;
+          order_id: string;
+          outcome: string;
+          proposed_by: string;
+          responded_at?: string | null;
+          responded_by?: string | null;
+          state?: string;
+          terms: string;
+        };
+        Update: {
+          created_at?: string;
+          expires_at?: string;
+          id?: string;
+          order_id?: string;
+          outcome?: string;
+          proposed_by?: string;
+          responded_at?: string | null;
+          responded_by?: string | null;
+          state?: string;
+          terms?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "settlement_offers_order_id_fkey";
+            columns: ["order_id"];
+            isOneToOne: false;
+            referencedRelation: "disputes";
+            referencedColumns: ["order_id"];
+          },
+          {
+            foreignKeyName: "settlement_offers_proposed_by_fkey";
+            columns: ["proposed_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "settlement_offers_responded_by_fkey";
+            columns: ["responded_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       wallets: {
         Row: {
           balance: number | null;
@@ -595,8 +785,20 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      admin_case_queue: {
+        Args: { p_limit?: number; p_offset?: number; p_resolved?: boolean };
+        Returns: Json;
+      };
       admin_moderate_product: {
         Args: { p_hidden: boolean; p_product_id: string; p_reason: string };
+        Returns: undefined;
+      };
+      admin_open_case: {
+        Args: { p_order_id: string; p_reason: string };
+        Returns: Json;
+      };
+      admin_request_case_info: {
+        Args: { p_message: string; p_order_id: string };
         Returns: undefined;
       };
       admin_suspend_trading: {
@@ -610,6 +812,20 @@ export type Database = {
           job_id: string;
         }[];
       };
+      confirm_pickup: {
+        Args: { p_order_id: string; p_token: string };
+        Returns: undefined;
+      };
+      confirm_return: { Args: { p_order_id: string }; Returns: undefined };
+      create_pickup_challenge: { Args: { p_order_id: string }; Returns: Json };
+      escalate_dispute: {
+        Args: { p_order_id: string; p_reason: string; p_urgent?: boolean };
+        Returns: undefined;
+      };
+      execute_case_decision: {
+        Args: { p_intent_id: string };
+        Returns: undefined;
+      };
       finish_recommendation_email: {
         Args: {
           p_claim_token: string;
@@ -621,6 +837,7 @@ export type Database = {
         Returns: undefined;
       };
       fund_wallet: { Args: { p_amount: number }; Returns: undefined };
+      get_pickup_workflow_config: { Args: never; Returns: Json };
       initiate_purchase:
         | {
             Args: { p_buyer_id: string; p_product_id: string };
@@ -631,9 +848,17 @@ export type Database = {
         Args: { p_description: string; p_order_id: string; p_reason: string };
         Returns: undefined;
       };
+      prepare_case_decision: {
+        Args: { p_order_id: string; p_outcome: string; p_reason: string };
+        Returns: string;
+      };
       prepare_recommendation_email: {
         Args: { p_claim_token: string; p_job_id: string };
         Returns: Json;
+      };
+      propose_settlement: {
+        Args: { p_order_id: string; p_outcome: string; p_terms: string };
+        Returns: string;
       };
       raise_dispute:
         | { Args: { p_order_id: string }; Returns: undefined }
@@ -641,6 +866,14 @@ export type Database = {
             Args: { p_buyer_id: string; p_order_id: string };
             Returns: undefined;
           };
+      record_evidence_hash: {
+        Args: { p_evidence_id: string; p_object_id: string; p_sha256: string };
+        Returns: undefined;
+      };
+      register_case_evidence: {
+        Args: { p_object_path: string; p_order_id: string };
+        Returns: string;
+      };
       release_escrow:
         | { Args: { p_order_id: string }; Returns: undefined }
         | {
@@ -653,6 +886,14 @@ export type Database = {
       };
       resolve_dispute_with_note: {
         Args: { p_favor_buyer: boolean; p_note: string; p_order_id: string };
+        Returns: undefined;
+      };
+      respond_settlement: {
+        Args: { p_accept: boolean; p_offer_id: string };
+        Returns: undefined;
+      };
+      set_pickup_workflow_enabled: {
+        Args: { p_enabled: boolean };
         Returns: undefined;
       };
       set_recommendation_email: {

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { dateLabel, errorMessage, statusLabels } from "@/lib/marketplace";
 import SiteShell, { useWorkspace } from "../components/SiteShell";
 import { Feedback, LoadState, PageHeader } from "../components/UI";
+import AdminMfa from "../components/AdminMfa";
 import RecommendationSettings from "../components/RecommendationSettings";
 import Link from "next/link";
 
@@ -23,6 +24,9 @@ function SettingsContent() {
         status: string;
         created_at: string;
         read_at: string | null;
+        message: string | null;
+        event_type: string;
+        order_id: string;
       }[]
     >([]);
   const lock = useRef(false);
@@ -37,7 +41,7 @@ function SettingsContent() {
           .maybeSingle(),
         supabase
           .from("notifications")
-          .select("id,status,created_at,read_at")
+          .select("id,status,created_at,read_at,message,event_type,order_id")
           .eq("user_id", userId)
           .order("created_at", { ascending: false })
           .limit(10),
@@ -93,6 +97,9 @@ function SettingsContent() {
         title="Settings"
         description="Choose which updates you want to receive."
       />
+      <section id="admin-authenticator">
+        <AdminMfa />
+      </section>
       <RecommendationSettings />
       <Feedback error={error} />
       {error && (
@@ -158,8 +165,13 @@ function SettingsContent() {
             {notifications.length ? (
               notifications.map((n) => (
                 <div className="order-row" key={n.id}>
-                  <Link href="/orders">
-                    <strong>{statusLabels[n.status] || n.status}</strong>
+                  <Link href={`/orders/${n.order_id}`}>
+                    <strong>
+                      {n.message ||
+                        statusLabels[n.status] ||
+                        n.event_type ||
+                        n.status}
+                    </strong>
                     <p className="small muted">{dateLabel(n.created_at)}</p>
                   </Link>
                   {!n.read_at && (

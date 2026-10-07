@@ -8,6 +8,7 @@ for (const route of [
   "/marketplace",
   "/marketplace/00000000-0000-4000-8000-000000000000",
   "/orders",
+  "/orders/00000000-0000-4000-8000-000000000000",
   "/profile",
   "/settings",
   "/admin",

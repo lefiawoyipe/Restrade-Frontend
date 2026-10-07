@@ -86,19 +86,17 @@ export async function loadProducts(
     if (data.length < 500) return items;
   }
 }
-export async function loadOrders(): Promise<Order[]> {
-  const items: Order[] = [];
-  for (let from = 0; ; from += 500) {
-    const { data, error } = await supabase
-      .from("orders")
-      .select(orderSelect)
-      .order("created_at", { ascending: false })
-      .order("id")
-      .range(from, from + 499);
-    if (error) throw error;
-    items.push(...(data as unknown as Order[]));
-    if (data.length < 500) return items;
-  }
+// Dashboard only needs a bounded recent history; full history is server-paginated on /orders.
+export async function loadOrders(userId: string): Promise<Order[]> {
+  const { data, error } = await supabase
+    .from("orders")
+    .select(orderSelect)
+    .eq("buyer_id", userId)
+    .order("created_at", { ascending: false })
+    .order("id")
+    .limit(20);
+  if (error) throw error;
+  return data as unknown as Order[];
 }
 export function notifyDataChanged(
   scopes: RefreshScope[] = ["marketplace", "personal", "admin"],

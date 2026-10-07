@@ -1,4 +1,5 @@
 "use client";
+import { snapshot } from "@/lib/pickup";
 import { useDataRefresh } from "@/lib/use-data-refresh";
 import Link from "next/link";
 import { useCallback, useRef, useState } from "react";
@@ -38,11 +39,33 @@ function DashboardContent() {
     [message, setMessage] = useState(""),
     [editing, setEditing] = useState<Product | null>(null);
   const lock = useRef(false);
+  const [summary, setSummary] = useState({ active: 0, completed: 0, held: 0 });
   const load = useCallback(async () => {
     try {
+      const completed = await supabase
+        .from("orders")
+        .select("id", { count: "exact", head: true })
+        .eq("buyer_id", userId)
+        .eq("status", "completed");
+      if (completed.error) throw completed.error;
+      let active = 0,
+        held = 0;
+      for (let offset = 0; ; offset += 500) {
+        const result = await supabase
+          .from("orders")
+          .select("id,amount")
+          .eq("buyer_id", userId)
+          .in("status", ["escrow_funded", "disputed"])
+          .order("id")
+          .range(offset, offset + 499);
+        if (result.error) throw result.error;
+        active += result.data.length;
+        held += result.data.reduce((sum, row) => sum + row.amount, 0);
+        if (result.data.length < 500) break;
+      }
       const [inventory, activity, wallet] = await Promise.all([
         loadProducts(userId, true),
-        loadOrders(),
+        loadOrders(userId),
         supabase
           .from("wallets")
           .select("balance")
@@ -53,6 +76,7 @@ function DashboardContent() {
       setProducts(inventory);
       setOrders(activity.filter((o) => o.buyer_id === userId));
       setBalance(wallet.data.balance);
+      setSummary({ active, held, completed: completed.count ?? 0 });
       setError("");
       return true;
     } catch (cause) {
@@ -90,9 +114,6 @@ function DashboardContent() {
       setBusy(false);
     }
   }
-  const active = orders.filter((o) =>
-    ["escrow_funded", "disputed"].includes(o.status ?? ""),
-  );
   return (
     <>
       <PageHeader
@@ -114,13 +135,13 @@ function DashboardContent() {
               ["Your listings", products.length, "Items you’ve listed", "shop"],
               [
                 "Active orders",
-                active.length,
+                summary.active,
                 "Ready for the next step",
                 "box",
               ],
               [
                 "Completed purchases",
-                orders.filter((o) => o.status === "completed").length,
+                summary.completed,
                 "Trades wrapped up",
                 "check",
               ],
@@ -145,17 +166,19 @@ function DashboardContent() {
               </div>
               {orders.length ? (
                 orders.slice(0, 3).map((o) => (
-                  <Link className="order-row" key={o.id} href="/orders">
+                  <Link
+                    className="order-row"
+                    key={o.id}
+                    href={`/orders/${o.id}`}
+                  >
                     <span className="row">
                       <ProductImage
-                        src={o.product?.image_url || null}
-                        title={o.product?.title || "Item"}
+                        src={snapshot(o).image}
+                        title={snapshot(o).title}
                         className="thumb"
                       />
                       <span>
-                        <strong>
-                          {o.product?.title || "Item unavailable"}
-                        </strong>
+                        <strong>{snapshot(o).title}</strong>
                         <br />
                         <small>
                           {money(o.amount)} · {o.id.slice(0, 8)}
@@ -186,9 +209,7 @@ function DashboardContent() {
               <small className="muted">Available test balance</small>
               <div className="wallet-held row between small">
                 <span className="muted">Held in escrow</span>
-                <strong>
-                  {money(active.reduce((sum, o) => sum + Number(o.amount), 0))}
-                </strong>
+                <strong>{money(summary.held)}</strong>
               </div>
               <button
                 className="btn lime"

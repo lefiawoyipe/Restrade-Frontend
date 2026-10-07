@@ -194,8 +194,12 @@ test("admin must review a reason and confirm before resolving a case", async ({
   });
   await page.getByRole("button", { name: "Review case" }).click();
   await page
+    .getByLabel("Case access purpose")
+    .fill("Investigate the reported transaction.");
+  await page.getByRole("button", { name: "Open case with audit" }).click();
+  await page
     .getByRole("combobox", { name: "Resolution", exact: true })
-    .selectOption("buyer");
+    .selectOption("refund");
   await page
     .getByLabel("Decision reason")
     .fill("Evidence supports refunding the buyer.");
@@ -203,14 +207,26 @@ test("admin must review a reason and confirm before resolving a case", async ({
   expect(
     requests.some((r) => r.path.endsWith("/resolve_dispute_with_note")),
   ).toBeFalsy();
-  await page.getByRole("button", { name: "Confirm resolution" }).click();
-  await expect(page.getByRole("status")).toContainText("Resolution recorded");
+  await page
+    .getByRole("button", { name: "Prepare decision for fresh authentication" })
+    .click();
+  await page.getByLabel("Fresh authenticator code").fill("123456");
+  await page
+    .getByRole("button", { name: "Verify and execute prepared decision" })
+    .click();
+  await expect(page.locator(".feedback[role=status]")).toContainText(
+    "Test wallet refunded",
+  );
   expect(
-    requests.find((r) => r.path.endsWith("/resolve_dispute_with_note"))?.body,
+    requests.find((r) => r.path.endsWith("/prepare_case_decision"))?.body,
   ).toMatchObject({
-    p_favor_buyer: true,
-    p_note: "Evidence supports refunding the buyer.",
+    p_outcome: "refund",
+    p_reason: "Evidence supports refunding the buyer.",
   });
+  expect(
+    requests.find((r) => r.path.endsWith("/execute_case_decision"))?.body,
+  ).toEqual({ p_intent_id: "55555555-5555-4555-8555-555555555555" });
+  expect(requests.some((r) => r.path.includes("resolve_dispute"))).toBeFalsy();
 });
 
 test("listing sends supported fields and rejects unsupported photo types", async ({

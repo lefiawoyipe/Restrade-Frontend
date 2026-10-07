@@ -64,13 +64,43 @@ for (const [rpc, parameters] of [
       p_description: "Anonymous denial check",
     },
   ],
+  ["admin_case_queue", { p_limit: 1, p_offset: 0, p_resolved: false }],
   [
-    "resolve_dispute_with_note",
+    "admin_open_case",
+    { p_order_id: invalidId, p_reason: "Anonymous denial check" },
+  ],
+  [
+    "prepare_case_decision",
     {
       p_order_id: invalidId,
-      p_favor_buyer: true,
-      p_note: "Anonymous denial check",
+      p_outcome: "refund",
+      p_reason: "Anonymous denial check",
     },
+  ],
+  ["execute_case_decision", { p_intent_id: invalidId }],
+  ["create_pickup_challenge", { p_order_id: invalidId }],
+  ["confirm_pickup", { p_order_id: invalidId, p_token: "0".repeat(64) }],
+  [
+    "propose_settlement",
+    {
+      p_order_id: invalidId,
+      p_outcome: "refund",
+      p_terms: "Anonymous denial check",
+    },
+  ],
+  ["respond_settlement", { p_offer_id: invalidId, p_accept: false }],
+  ["confirm_return", { p_order_id: invalidId }],
+  [
+    "escalate_dispute",
+    {
+      p_order_id: invalidId,
+      p_reason: "Anonymous denial check",
+      p_urgent: true,
+    },
+  ],
+  [
+    "admin_request_case_info",
+    { p_order_id: invalidId, p_message: "Anonymous denial check" },
   ],
 ]) {
   const result = await client.rpc(rpc, parameters);

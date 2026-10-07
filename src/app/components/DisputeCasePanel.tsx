@@ -1,79 +1,189 @@
-"use client";
-import { useDataRefresh } from "@/lib/use-data-refresh";
+﻿"use client";
 import { useCallback, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
-  dateLabel,
   errorMessage,
   money,
   notifyDataChanged,
-  statusLabels,
   type Order,
 } from "@/lib/marketplace";
+import {
+  parseOrder,
+  record,
+  snapshot,
+  text,
+  validLength,
+  type Dispute,
+} from "@/lib/pickup";
+import type { Tables } from "@/lib/database.types";
+import { useDataRefresh } from "@/lib/use-data-refresh";
 import { useWorkspace } from "./SiteShell";
 import { Feedback, LoadState, Modal } from "./UI";
+import { OrderTime, useNow } from "./OrderTime";
+import CaseEvidence from "./CaseEvidence";
+import CaseNegotiation from "./CaseNegotiation";
+import CaseDecision from "./CaseDecision";
+import OrderHistory from "./OrderHistory";
 
-interface Dispute {
-  reason: string | null;
-  description: string | null;
-  resolved_at: string | null;
-  resolution_note: string | null;
-  favor_buyer: boolean | null;
+type Props = { order?: Order; orderId?: string; onClose: () => void };
+export default function DisputeCasePanel({ order, orderId, onClose }: Props) {
+  const { profile } = useWorkspace();
+  const id = order?.id ?? orderId;
+  if (!id) return null;
+  return (
+    <Modal
+      title={`Case ${id.slice(0, 8).toUpperCase()}`}
+      description="Review the recorded case information."
+      onClose={onClose}
+    >
+      {profile.is_admin ? (
+        <AdminAccess orderId={id} />
+      ) : order ? (
+        <CaseContent order={order} />
+      ) : (
+        <p>Order information unavailable.</p>
+      )}
+    </Modal>
+  );
 }
-interface Message {
-  id: string;
-  body: string;
-  author_id: string;
-  created_at: string;
-  author: { full_name: string } | null;
+function AdminAccess({ orderId }: { orderId: string }) {
+  const now = useNow(),
+    lock = useRef(false);
+  const [reason, setReason] = useState(""),
+    [grant, setGrant] = useState<{
+      order: Order;
+      expires: string;
+      reputation: unknown[];
+    } | null>(null),
+    [busy, setBusy] = useState(false),
+    [error, setError] = useState("");
+  if (grant && Date.parse(grant.expires) > now)
+    return (
+      <>
+        <p className="note">
+          Audited access expires <OrderTime value={grant.expires} />. Reopening
+          requires a new access reason.
+        </p>
+        <details>
+          <summary>Participant context</summary>
+          <p>
+            Counts are context, not guilt scores. New accounts and disputed
+            trades do not prove misconduct.
+          </p>
+          {grant.reputation.map((entry, index) => {
+            const data = record(entry);
+            return (
+              <div className="case-message" key={index}>
+                <strong>
+                  {text(data.user_id) === grant.order.buyer_id
+                    ? "Buyer"
+                    : "Seller"}
+                </strong>
+                <p>
+                  Account created:{" "}
+                  <OrderTime value={text(data.account_created_at)} />
+                </p>
+                <p>
+                  {String(data.disputes ?? 0)} disputes and{" "}
+                  {String(data.completed ?? 0)} completed trades across{" "}
+                  {String(data.total_orders ?? 0)} total orders.
+                </p>
+              </div>
+            );
+          })}
+        </details>
+        <CaseContent key={grant.expires} order={grant.order} />
+      </>
+    );
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (lock.current) return;
+        if (!validLength(reason, 3, 2000)) {
+          setError("Enter an access purpose of 3–2000 characters.");
+          return;
+        }
+        lock.current = true;
+        setBusy(true);
+        setError("");
+        void (async () => {
+          try {
+            const result = await supabase.rpc("admin_open_case", {
+              p_order_id: orderId,
+              p_reason: reason.trim(),
+            });
+            if (result.error) throw result.error;
+            const data = record(result.data),
+              expires = text(data.access_expires_at);
+            if (!Number.isFinite(Date.parse(expires)))
+              throw new Error("Case access expiry was not returned.");
+            setGrant({
+              order: parseOrder(data.order),
+              expires,
+              reputation: Array.isArray(data.reputation) ? data.reputation : [],
+            });
+            notifyDataChanged(["admin"]);
+          } catch (cause) {
+            setError(errorMessage(cause));
+          } finally {
+            lock.current = false;
+            setBusy(false);
+          }
+        })();
+      }}
+    >
+      <p>
+        {grant
+          ? "Case access expired. Reopen explicitly to continue."
+          : "Opening private case information is recorded in audit history. Only arbitration and resolved cases are available."}
+      </p>
+      <label className="field">
+        Case access purpose
+        <textarea
+          aria-label="Case access purpose"
+          required
+          minLength={3}
+          maxLength={2000}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          disabled={busy}
+        />
+      </label>
+      <Feedback error={error} />
+      <button className="btn primary" disabled={busy}>
+        {grant ? "Reopen case with audit" : "Open case with audit"}
+      </button>
+    </form>
+  );
 }
-interface OrderEvent {
-  id: string;
-  status: string;
-  created_at: string;
-}
-export default function DisputeCasePanel({
-  order,
-  onClose,
-}: {
-  order: Order;
-  onClose: () => void;
-}) {
-  const { userId, profile } = useWorkspace();
+function CaseContent({ order }: { order: Order }) {
+  const { profile, userId } = useWorkspace(),
+    lock = useRef(false);
   const [dispute, setDispute] = useState<Dispute | null>(null),
-    [messages, setMessages] = useState<Message[]>([]),
-    [events, setEvents] = useState<OrderEvent[]>([]),
-    [evidence, setEvidence] = useState<{ name: string; url: string }[]>([]),
+    [messages, setMessages] = useState<
+      (Tables<"dispute_messages"> & {
+        author: { full_name: string | null } | null;
+      })[]
+    >([]),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [actionError, setActionError] = useState(""),
-    [success, setSuccess] = useState(""),
-    [busy, setBusy] = useState(false),
     [body, setBody] = useState(""),
-    [note, setNote] = useState(""),
-    [outcome, setOutcome] = useState(""),
-    [confirm, setConfirm] = useState(false);
-  const lock = useRef(false);
+    [busy, setBusy] = useState(false),
+    [page, setPage] = useState(0),
+    [more, setMore] = useState(false);
+  const sequence = useRef(0);
   const load = useCallback(async () => {
+    const request = ++sequence.current;
     try {
-      const [details, folders] = await Promise.all([
+      const [details, conversation] = await Promise.all([
         supabase
           .from("disputes")
           .select("*")
           .eq("order_id", order.id)
           .maybeSingle(),
-        supabase.storage.from("dispute-evidence").list(order.id),
-      ]);
-      for (const result of [details, folders])
-        if (result.error) throw result.error;
-      if (!details.data)
-        throw new Error(
-          "Case details are unavailable. Refresh before taking any action.",
-        );
-      const conversation: Message[] = [],
-        history: OrderEvent[] = [];
-      for (let from = 0; ; from += 500) {
-        const result = await supabase
+        supabase
           .from("dispute_messages")
           .select(
             "*,author:profiles!dispute_messages_author_id_fkey(full_name)",
@@ -81,371 +191,160 @@ export default function DisputeCasePanel({
           .eq("order_id", order.id)
           .order("created_at")
           .order("id")
-          .range(from, from + 499);
-        if (result.error) throw result.error;
-        conversation.push(...(result.data as unknown as Message[]));
-        if (result.data.length < 500) break;
-      }
-      for (let from = 0; ; from += 500) {
-        const result = await supabase
-          .from("order_events")
-          .select("*")
-          .eq("order_id", order.id)
-          .order("created_at")
-          .order("id")
-          .range(from, from + 499);
-        if (result.error) throw result.error;
-        history.push(...result.data);
-        if (result.data.length < 500) break;
-      }
-      const paths: string[] = [];
-      for (const folder of folders.data || []) {
-        for (let offset = 0; ; offset += 100) {
-          const files = await supabase.storage
-            .from("dispute-evidence")
-            .list(`${order.id}/${folder.name}`, { limit: 100, offset });
-          if (files.error) throw files.error;
-          paths.push(
-            ...files.data
-              .filter((file) => file.id)
-              .map((file) => `${order.id}/${folder.name}/${file.name}`),
-          );
-          if (files.data.length < 100) break;
-        }
-      }
-      const links = paths.length
-        ? await supabase.storage
-            .from("dispute-evidence")
-            .createSignedUrls(paths, 600)
-        : null;
-      if (links?.error) throw links.error;
+          .range(page * 50, page * 50 + 50),
+      ]);
+      if (details.error) throw details.error;
+      if (conversation.error) throw conversation.error;
+      if (!details.data)
+        throw new Error(
+          "Case information is unavailable or access has expired.",
+        );
+      if (request !== sequence.current) return;
       setDispute(details.data);
-      setMessages(conversation);
-      setEvents(history);
-      setEvidence(
-        (links?.data || []).flatMap((item) =>
-          item.signedUrl
-            ? [
-                {
-                  name: item.path?.split("/").at(-1) || "Evidence",
-                  url: item.signedUrl,
-                },
-              ]
-            : [],
-        ),
-      );
+      setMessages(conversation.data.slice(0, 50));
+      setMore(conversation.data.length > 50);
       setError("");
       return true;
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (request === sequence.current) setError(errorMessage(cause));
       return false;
     } finally {
-      setLoading(false);
+      if (request === sequence.current) setLoading(false);
     }
-  }, [order.id]);
-  useDataRefresh(load, ["personal", "admin"]);
-  async function act(action: () => Promise<void>) {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(true);
-    setActionError("");
-    setSuccess("");
-    try {
-      await action();
-      notifyDataChanged(["personal", "admin", "marketplace"]);
-    } catch (cause) {
-      setActionError(errorMessage(cause));
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  }
-  async function upload(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = event.currentTarget,
-      file = new FormData(form).get("evidence") as File;
-    if (
-      !file?.size ||
-      file.size > 10485760 ||
-      !["image/jpeg", "image/png", "application/pdf"].includes(file.type)
-    ) {
-      setActionError("Choose a JPEG, PNG or PDF file up to 10 MB.");
-      return;
-    }
-    await act(async () => {
-      const extension =
-        file.type === "application/pdf"
-          ? "pdf"
-          : file.type === "image/png"
-            ? "png"
-            : "jpg";
-      const result = await supabase.storage
-        .from("dispute-evidence")
-        .upload(
-          `${order.id}/${userId}/${crypto.randomUUID()}.${extension}`,
-          file,
-        );
-      if (result.error) throw result.error;
-      form.reset();
-      setSuccess("Evidence uploaded securely.");
-    });
-  }
+  }, [order.id, page]);
+  useDataRefresh(load, ["personal", "admin", "marketplace"]);
+  if (loading || !dispute)
+    return <LoadState loading={loading} error={error} retry={load} />;
+  const party =
+    !profile.is_admin && [order.buyer_id, order.seller_id].includes(userId);
   return (
-    <Modal
-      title={`Case ${order.id.slice(0, 8).toUpperCase()}`}
-      description={`${order.product?.title || "Item"} · ${money(order.amount)}`}
-      busy={busy}
-      onClose={onClose}
-    >
-      {loading || (error && !dispute) ? (
-        <LoadState loading={loading} error={error} retry={load} />
-      ) : (
-        <div className="stack">
-          <div className="note">
-            <strong>
-              Buyer’s report{dispute?.reason ? ` · ${dispute.reason}` : ""}
-            </strong>
-            <p className="preserve-lines">
-              {dispute?.description ||
-                "No detailed report was recorded for this case."}
+    <div className="stack">
+      <h3>
+        {snapshot(order).title} · {money(order.amount)} test wallet
+      </h3>
+      <Feedback error={error} />
+      <div className="note">
+        <strong>{dispute.reason || "Buyer’s report"}</strong>
+        <p className="preserve-lines">{dispute.description}</p>
+        <p>Stage: {dispute.stage.replaceAll("_", " ")}</p>
+      </div>
+      <section>
+        <h3>Case conversation</h3>
+        {messages.map((m) => (
+          <article className="case-message" key={m.id}>
+            <strong>{m.author?.full_name ?? m.author_id}</strong>
+            <p>
+              <OrderTime value={m.created_at} />
             </p>
-          </div>
-          <section>
-            <h3>Case conversation</h3>
-            {messages.length ? (
-              messages.map((m) => (
-                <div className="case-message" key={m.id}>
-                  <strong>{m.author?.full_name || "Participant"}</strong>
-                  <small className="muted"> · {dateLabel(m.created_at)}</small>
-                  <p className="preserve-lines">{m.body}</p>
-                </div>
-              ))
-            ) : (
-              <p className="small muted">No responses yet.</p>
-            )}
-          </section>
-          <section>
-            <h3>Evidence</h3>
-            {evidence.length ? (
-              <ul className="evidence-list">
-                {evidence.map((file, i) => (
-                  <li key={file.name}>
-                    <a
-                      className="text-link"
-                      target="_blank"
-                      rel="noreferrer"
-                      href={file.url}
-                    >
-                      View attachment {i + 1} (
-                      {file.name.split(".").at(-1)?.toUpperCase()})
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="small muted">No evidence has been uploaded.</p>
-            )}
-            <button
-              type="button"
-              className="text-link"
-              onClick={load}
+            <p className="preserve-lines">{m.body}</p>
+          </article>
+        ))}
+        {!messages.length && <p>No responses yet.</p>}
+        <div className="form-actions">
+          <button
+            className="btn"
+            disabled={page === 0}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Earlier messages
+          </button>
+          <span>Page {page + 1}</span>
+          <button
+            className="btn"
+            disabled={!more}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Later messages
+          </button>
+        </div>
+      </section>
+      {!dispute.resolved_at && (party || profile.is_admin) && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (lock.current) return;
+            if (!validLength(body, 3, profile.is_admin ? 2000 : 5000)) {
+              setActionError(
+                "Enter a message of at least 3 characters within the indicated limit.",
+              );
+              return;
+            }
+            lock.current = true;
+            setBusy(true);
+            setActionError("");
+            void (async () => {
+              try {
+                const result = profile.is_admin
+                  ? await supabase.rpc("admin_request_case_info", {
+                      p_order_id: order.id,
+                      p_message: body.trim(),
+                    })
+                  : await supabase.from("dispute_messages").insert({
+                      order_id: order.id,
+                      author_id: userId,
+                      body: body.trim(),
+                    });
+                if (result.error) throw result.error;
+                setBody("");
+                notifyDataChanged(["personal", "admin"]);
+              } catch (cause) {
+                setActionError(errorMessage(cause));
+              } finally {
+                lock.current = false;
+                setBusy(false);
+              }
+            })();
+          }}
+        >
+          <label className="field">
+            {profile.is_admin
+              ? "Request further information"
+              : "Add a response"}
+            <textarea
+              aria-label={
+                profile.is_admin
+                  ? "Request further information"
+                  : "Add a response"
+              }
+              required
+              minLength={3}
+              maxLength={profile.is_admin ? 2000 : 5000}
+              value={body}
               disabled={busy}
-            >
-              Refresh attachments
-            </button>
-          </section>
-          {dispute && !dispute.resolved_at && (
-            <>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (!body.trim()) {
-                    setActionError("Enter a response.");
-                    return;
-                  }
-                  void act(async () => {
-                    const result = await supabase
-                      .from("dispute_messages")
-                      .insert({
-                        order_id: order.id,
-                        author_id: userId,
-                        body: body.trim(),
-                      });
-                    if (result.error) throw result.error;
-                    setBody("");
-                    setSuccess("Response added.");
-                  });
-                }}
-              >
-                <label className="field">
-                  Add a response
-                  <textarea
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    required
-                    maxLength={5000}
-                    rows={3}
-                    disabled={busy}
-                  />
-                </label>
-                <div className="form-actions">
-                  <button className="btn" disabled={busy}>
-                    Send response
-                  </button>
-                </div>
-              </form>
-              <form onSubmit={upload}>
-                <label className="field">
-                  Add evidence
-                  <input
-                    name="evidence"
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf"
-                    required
-                    disabled={busy}
-                  />
-                  <small>
-                    Private to the case participants and administrators. Up to
-                    10 MB.
-                  </small>
-                </label>
-                <div className="form-actions">
-                  <button className="btn" disabled={busy}>
-                    Upload evidence
-                  </button>
-                </div>
-              </form>
-            </>
-          )}
-          <details>
-            <summary>Order history</summary>
-            {events.length ? (
-              events.map((item) => (
-                <p key={item.id}>
-                  {dateLabel(item.created_at)} ·{" "}
-                  {statusLabels[item.status] || item.status}
-                </p>
-              ))
-            ) : (
-              <p>No history recorded.</p>
-            )}
-          </details>
-          {dispute?.resolved_at && (
-            <div className="note">
-              <strong>
-                {dispute.favor_buyer
-                  ? "Buyer refunded"
-                  : "Payment released to seller"}
-              </strong>
-              <p className="preserve-lines">
-                {dispute.resolution_note || "No resolution note recorded."}
-              </p>
-              <p>{dateLabel(dispute.resolved_at)}</p>
-            </div>
-          )}
-          {profile.is_admin &&
-            !profile.is_suspended &&
-            order.buyer_id !== userId &&
-            order.product?.seller_id !== userId &&
-            order.status === "disputed" &&
-            !dispute?.resolved_at && (
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  if (note.trim().length < 3 || note.trim().length > 5000) {
-                    setActionError(
-                      "Record a decision reason of 3?5000 characters.",
-                    );
-                    return;
-                  }
-                  setConfirm(true);
-                }}
-              >
-                <label className="field">
-                  Resolution
-                  <select
-                    required
-                    value={outcome}
-                    onChange={(event) => {
-                      setOutcome(event.target.value);
-                      setConfirm(false);
-                    }}
-                    disabled={busy}
-                  >
-                    <option value="">Choose a resolution</option>
-                    <option value="buyer">Refund buyer</option>
-                    <option value="seller">Release payment to seller</option>
-                  </select>
-                </label>
-                <label className="field case-reason">
-                  Decision reason
-                  <textarea
-                    required
-                    maxLength={5000}
-                    rows={3}
-                    value={note}
-                    onChange={(event) => {
-                      setNote(event.target.value);
-                      setConfirm(false);
-                    }}
-                    disabled={busy}
-                  />
-                </label>
-                {confirm ? (
-                  <div className="note amber">
-                    <strong>Confirm this decision?</strong>
-                    <p>
-                      {outcome === "buyer" ? "Refund buyer" : "Pay seller"} ·{" "}
-                      {money(order.amount)}. This action cannot be undone.
-                    </p>
-                    <p className="preserve-lines">{note}</p>
-                    <div className="form-actions">
-                      <button
-                        className="btn"
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setConfirm(false)}
-                      >
-                        Go back
-                      </button>
-                      <button
-                        className="btn primary"
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          act(async () => {
-                            const result = await supabase.rpc(
-                              "resolve_dispute_with_note",
-                              {
-                                p_order_id: order.id,
-                                p_favor_buyer: outcome === "buyer",
-                                p_note: note.trim(),
-                              },
-                            );
-                            if (result.error) throw result.error;
-                            setSuccess(
-                              "Resolution recorded. Funds transferred.",
-                            );
-                            setConfirm(false);
-                          })
-                        }
-                      >
-                        {busy ? "Resolving…" : "Confirm resolution"}
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="form-actions">
-                    <button className="btn primary" disabled={busy}>
-                      Review decision
-                    </button>
-                  </div>
-                )}
-              </form>
-            )}
-          <Feedback error={actionError} message={success} />
+              onChange={(e) => setBody(e.target.value)}
+            />
+          </label>
+          <button className="btn" disabled={busy}>
+            {profile.is_admin
+              ? "Send audited information request"
+              : "Send response"}
+          </button>
+          <Feedback error={actionError} />
+        </form>
+      )}
+      <CaseEvidence
+        orderId={order.id}
+        resolved={Boolean(dispute.resolved_at)}
+      />
+      <CaseNegotiation order={order} dispute={dispute} />
+      <OrderHistory order={order} />
+      {dispute.resolved_at && (
+        <div className="note">
+          <strong>
+            {dispute.favor_buyer
+              ? "Test wallet refunded"
+              : "Test wallet released to seller"}
+          </strong>
+          <p className="preserve-lines">{dispute.resolution_note}</p>
+          <OrderTime value={dispute.resolved_at} />
         </div>
       )}
-    </Modal>
+      {profile.is_admin &&
+        !profile.is_suspended &&
+        userId !== order.buyer_id &&
+        userId !== order.seller_id &&
+        dispute.stage === "admin_review" &&
+        !dispute.resolved_at && <CaseDecision order={order} />}
+    </div>
   );
 }
